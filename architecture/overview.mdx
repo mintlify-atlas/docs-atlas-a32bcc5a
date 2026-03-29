@@ -1,0 +1,84 @@
+---
+title: "Architecture overview"
+description: "How Rustic Engine's six-crate workspace prevents the monolithic collapse that killed V1."
+---
+
+Rustic Engine V2 exists because V1 failed. The root cause was architectural: a single `main.rs` that grew to over 2000 lines. When freeplay menus were added, cascading breakage made the codebase effectively unmaintainable. V2's answer is a Cargo workspace where every subsystem lives in its own crate with a single, enforced responsibility.
+
+<Warning>
+  The critical rule: no module should exceed ~500 lines. If a module grows beyond that, split it. The V1 failure was a monolithic `main.rs` — that must never happen again.
+</Warning>
+
+## The six-crate workspace
+
+The workspace is declared in the root `Cargo.toml`. Each member crate owns exactly one domain:
+
+```toml Cargo.toml
+[workspace]
+resolver = "2"
+members = [
+    "crates/rustic-core",
+    "crates/rustic-audio",
+    "crates/rustic-render",
+    "crates/rustic-gameplay",
+    "crates/rustic-scripting",
+    "crates/rustic-app",
+    "crates/rustanimate",
+]
+```
+
+## Dependency flow
+
+Dependencies flow in one direction only. `rustic-core` is the leaf — it has zero rendering or audio dependencies. `rustic-app` is the root — it depends on everything else and wires the crates together. No crate may introduce a circular dependency.
+
+```text
+rustic-app
+├── rustic-render
+│   └── rustanimate
+├── rustic-audio
+├── rustic-gameplay
+│   └── rustic-core
+├── rustic-scripting
+│   └── rustic-core
+└── rustic-core
+```
+
+`rustic-core` sits at the bottom of this graph deliberately. Data types, chart parsing, scoring math, and asset path resolution must not pull in a GPU backend or audio library. Keeping `rustic-core` dependency-free means you can run all parsing and logic tests without a window or sound device.
+
+## Single-responsibility principle
+
+Each crate answers one question:
+
+| Crate | Question it answers |
+|---|---|
+| `rustic-core` | What does the game data look like? |
+| `rustic-audio` | How does sound play? |
+| `rustic-render` | How does everything get drawn? |
+| `rustic-gameplay` | What are the rules of the game? |
+| `rustic-scripting` | How do Lua scripts interact with the engine? |
+| `rustic-app` | How do all these pieces start up and connect? |
+
+When you find yourself reaching across this boundary — for example, putting rendering logic inside `rustic-gameplay` — that is the signal to stop and route the work through events or the app layer instead.
+
+## Explore the crates
+
+<CardGroup cols={2}>
+  <Card title="rustic-core" icon="database" href="/architecture/crates#rustic-core">
+    Data types and parsing. Chart formats, character definitions, stage files, scoring math. Zero rendering or audio dependencies.
+  </Card>
+  <Card title="rustic-audio" icon="volume-high" href="/architecture/crates#rustic-audio">
+    Audio playback via kira. Music and vocals sync, sound effects, BPM/beat tracking via the conductor.
+  </Card>
+  <Card title="rustic-render" icon="paintbrush" href="/architecture/crates#rustic-render">
+    All drawing. Sparrow XML atlas parsing, sprite animation, camera system, HUD. Uses wgpu.
+  </Card>
+  <Card title="rustic-gameplay" icon="gamepad" href="/architecture/crates#rustic-gameplay">
+    Game logic only. Input handling, note hit/miss detection, hold notes, event system. No rendering.
+  </Card>
+  <Card title="rustic-scripting" icon="code" href="/architecture/crates#rustic-scripting">
+    Lua VM integration. Exposes the full Psych Engine Lua API with matching function signatures.
+  </Card>
+  <Card title="rustic-app" icon="play" href="/architecture/crates#rustic-app">
+    Binary entry point. State machine, screen transitions, wires all crates together.
+  </Card>
+</CardGroup>

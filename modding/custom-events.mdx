@@ -1,0 +1,210 @@
+---
+title: 'Custom events'
+description: 'How chart events work in Rustic Engine and how to handle them in Lua scripts.'
+keywords: ['events', 'custom events', 'lua', 'onEvent', 'eventEarlyTrigger', 'chart events']
+---
+
+Events are time-stamped triggers embedded in chart files that fire during gameplay. The engine fires built-in events automatically, and your Lua scripts can handle any event — including events you define yourself — through the `onEvent` callback.
+
+## How events work in a chart
+
+Events are stored in the top-level `events` array of a chart JSON file. Each entry is a two-element array: a strum time (milliseconds) and a list of event tuples.
+
+```json
+"events": [
+  [2000.0, [["Hey!", "BF", "0.6"]]],
+  [4000.0, [
+    ["Add Camera Zoom", "0.04", "0.03"],
+    ["Play Animation", "hey", "BF"]
+  ]]
+]
+```
+
+Each event tuple is `[name, value1, value2]`. All three values are strings. When the song position reaches a strum time, all events at that time fire together.
+
+Events can also appear inside the `sectionNotes` array of a section. A note with a negative direction value (or a string direction) is parsed as a legacy inline event:
+
+```json
+"sectionNotes": [
+  [500.0, "Hey!", "BF", "0.6"]
+]
+```
+
+### The EventNote data structure
+
+Internally, each parsed event is represented as:
+
+| Field | Type | Description |
+|---|---|---|
+| `strum_time` | `f64` | Time in milliseconds when the event fires |
+| `name` | `String` | Event name (e.g. `"Hey!"`, `"Add Camera Zoom"`) |
+| `value1` | `String` | First parameter string |
+| `value2` | `String` | Second parameter string |
+
+---
+
+## Built-in events
+
+These events are handled directly by the engine before Lua scripts receive them:
+
+| Event name | value1 | value2 | Effect |
+|---|---|---|---|
+| `Hey!` | Target: `"BF"`, `"DAD"`, or `"GF"` | Duration (seconds) | Forces the target character to play their `hey` animation |
+| `Add Camera Zoom` | Game camera zoom delta | HUD camera zoom delta | Adds a zoom bump (e.g. `"0.04"` and `"0.03"`) |
+| `Play Animation` | Animation name | Character: `"BF"`, `"DAD"`, or `"GF"` | Plays a named animation on the target character |
+
+<Note>
+  Your `onEvent` Lua callback is called for **every** event, including built-in ones. You can extend built-in behavior or inspect event values from Lua without needing to replace the engine handling.
+</Note>
+
+---
+
+## Handling events in Lua
+
+### onEvent
+
+The primary callback for custom events. The engine calls this on every loaded script whenever an event fires.
+
+```lua
+function onEvent(name, value1, value2)
+  if name == "My Custom Event" then
+    -- value1 and value2 are both strings
+    local intensity = tonumber(value1) or 1.0
+    setProperty("camGame.zoom", getProperty("camGame.zoom") + intensity)
+  end
+end
+```
+
+`onEvent` receives three string arguments:
+
+| Parameter | Type | Description |
+|---|---|---|
+| `name` | string | The event name from the chart |
+| `value1` | string | First value field from the chart |
+| `value2` | string | Second value field from the chart |
+
+### eventEarlyTrigger
+
+Return a number of milliseconds from `eventEarlyTrigger` to pre-fire a named event before its chart time. This is useful for events that need to trigger visual changes slightly ahead of the beat.
+
+```lua
+function eventEarlyTrigger(name)
+  if name == "Add Camera Zoom" then
+    return 1 -- fire 1ms early
+  end
+  return 0
+end
+```
+
+The engine checks `eventEarlyTrigger` for each pending event and subtracts the returned offset from the event's strum time.
+
+---
+
+## Custom events
+
+To add your own event, place it in your chart's `events` array with any name and string values that make sense for your mod. There is no registration step — just use the name in the chart and check for it in `onEvent`.
+
+```json
+"events": [
+  [8000.0, [["Screen Flash", "camGame", "0.5"]]]
+]
+```
+
+```lua
+function onEvent(name, value1, value2)
+  if name == "Screen Flash" then
+    local camera = value1        -- "camGame"
+    local duration = tonumber(value2) or 0.5
+    cameraFlash(camera, "FFFFFF", duration, 1)
+  end
+end
+```
+
+You can also place custom event scripts in the `custom_events/` directory of your mod. The engine scans all search roots for `custom_events/*.lua` and loads them. Each file can define its own `onEvent` handler.
+
+---
+
+## The Wildcard event type (VS Retrospecter)
+
+The VS Retrospecter Part 2 mod uses a **Wildcard** event pattern: the event `name` is the name of a Lua function to call, and `value1` is the argument to pass. The engine implements this through `ScriptManager::call_lua_function`, which calls a named function on all loaded scripts with a single string argument.
+
+```lua
+-- In a Retrospecter chart, an event with name="introSequence" and value1="start"
+-- causes the engine to call:
+function introSequence(arg)
+  -- arg == "start"
+  if arg == "start" then
+    makeLuaSprite("overlay", "retrospecter/overlay", 0, 0)
+    addLuaSprite("overlay", true)
+  end
+end
+```
+
+This means any function defined in your song scripts can be invoked as an event from the chart by setting the event name to the function name. You do not need a dedicated `onEvent` handler for Wildcard events — the function is called directly.
+
+<Warning>
+  Wildcard event calls use `log::warn` if the function does not exist on a script. This is expected when a chart event targets a function defined only in some scripts.
+</Warning>
+
+---
+
+## Examples
+
+### Hey! event
+
+Causes a character to play a reaction animation at a specific beat.
+
+```json
+[2000.0, [["Hey!", "BF", "0.6"]]]
+```
+
+In Lua, you can observe or extend this:
+
+```lua
+function onEvent(name, value1, value2)
+  if name == "Hey!" then
+    -- value1: "BF", "DAD", or "GF"
+    -- value2: duration string
+    local who = value1
+    local duration = tonumber(value2) or 0.6
+    debugPrint("Hey! triggered on " .. who .. " for " .. duration .. "s")
+  end
+end
+```
+
+### Add Camera Zoom event
+
+Bumps both camera layers on a beat drop.
+
+```json
+[16000.0, [["Add Camera Zoom", "0.04", "0.03"]]]
+```
+
+```lua
+function onEvent(name, value1, value2)
+  if name == "Add Camera Zoom" then
+    local gameZoom = tonumber(value1) or 0
+    local hudZoom  = tonumber(value2) or 0
+    -- Engine handles the actual zoom add; you can layer your own effects here
+    debugPrint("Zoom bump: game+" .. gameZoom .. " hud+" .. hudZoom)
+  end
+end
+```
+
+### Play Animation event
+
+Forces a character animation outside the normal note-driven flow.
+
+```json
+[12000.0, [["Play Animation", "scared", "GF"]]]
+```
+
+```lua
+function onEvent(name, value1, value2)
+  if name == "Play Animation" then
+    local anim = value1   -- animation name, e.g. "scared"
+    local who  = value2   -- "BF", "DAD", or "GF"
+    debugPrint(who .. " plays " .. anim)
+  end
+end
+```

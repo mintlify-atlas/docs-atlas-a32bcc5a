@@ -1,0 +1,137 @@
+---
+title: "Contributing"
+description: "How to set up a development environment, build the engine, and follow the architectural rules that keep Rustic Engine from repeating V1's mistakes."
+keywords: ["contributing", "development", "build", "setup", "architecture"]
+---
+
+## Prerequisites
+
+You need the Rust toolchain installed before you can build anything.
+
+<Steps>
+  <Step title="Install Rust">
+    Install `rustup` from [rustup.rs](https://rustup.rs), then verify:
+
+    ```bash
+    rustup --version
+    cargo --version
+    ```
+
+    Rustic Engine does not require a nightly toolchain — stable is sufficient.
+  </Step>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/Quiet-Wolfe/Rustic-Engine.git
+    cd Rustic-Engine
+    ```
+  </Step>
+  <Step title="Build the workspace">
+    ```bash
+    cargo build
+    ```
+
+    The workspace pulls in all six crates on first build. Subsequent builds are incremental.
+  </Step>
+</Steps>
+
+## Build commands
+
+```bash
+cargo build              # debug build (all crates)
+cargo run                # build and launch the engine
+cargo test               # run all workspace tests
+cargo test -p rustic-core  # run tests for a single crate
+cargo clippy             # lint all crates
+```
+
+<Tip>
+  Run `cargo clippy` before committing. Clippy catches a large class of Rust mistakes that the compiler alone won't reject.
+</Tip>
+
+## Crate structure
+
+The project is a Cargo workspace. Each crate has one responsibility and one only.
+
+| Crate | Responsibility |
+|-------|----------------|
+| `rustic-core` | Data types and parsing. Charts, characters, stages, scoring math, asset paths. Zero rendering or audio dependencies. |
+| `rustic-audio` | Audio playback via `kira`. Instrumental + vocal sync, conductor BPM tracking, sound effects. |
+| `rustic-render` | All drawing. Sparrow atlas parsing, sprite animation, camera, HUD, health bar, stage. |
+| `rustic-gameplay` | Game logic. Input, hit/miss detection, hold notes, health, score. Emits events — no direct rendering. |
+| `rustic-scripting` | Lua VM integration. Full Psych Engine Lua API surface with matching function signatures. |
+| `rustic-app` | Binary entry point and state machine. Wires crates together. Each screen is its own module. |
+
+## References directory
+
+`references/` contains source material used for behavior matching. These files are not compiled into the engine.
+
+<AccordionGroup>
+  <Accordion title="FNF-PsychEngine/">
+    Full Psych Engine Haxe source code and assets. This is the primary reference for matching behavior exactly — when you're unsure how something should work, read the Haxe source here first.
+  </Accordion>
+  <Accordion title="funkin/">
+    Base Friday Night Funkin' source (pre-Psych Engine). Useful for understanding the original chart and asset formats before Psych Engine extended them.
+  </Accordion>
+  <Accordion title="RusticV1/">
+    The failed first attempt at this project. The parsing code (atlas, charts) is worth reusing. The architectural decisions are not — V1 is here as a cautionary reference, not a model.
+  </Accordion>
+  <Accordion title="VS-RetroSpecter-PART-2-Compiled/">
+    A compiled mod with custom events, modcharts, and Lua scripts. This is the integration test target for Phase 5. When this mod runs correctly end-to-end, the engine is feature-complete.
+  </Accordion>
+</AccordionGroup>
+
+## Architecture rules
+
+### No crate should become a dumping ground
+
+If a module grows beyond ~500 lines, split it into smaller focused files. This is a hard rule — not a suggestion.
+
+The V1 engine failed because a single `main.rs` grew to over 2,000 lines. Adding a freeplay menu caused breakage that cascaded across the entire file. Every change became risky because everything was coupled to everything else. V2 exists specifically to avoid repeating that mistake.
+
+<Warning>
+  If you find yourself adding an unrelated function to an existing module because it's "close enough", that's the V1 pattern starting again. Create a new module instead.
+</Warning>
+
+### Each screen in `rustic-app` is its own module
+
+The state machine in `rustic-app` manages transitions between screens. Title screen, main menu, freeplay, story mode, loading, playing, and results are each isolated modules — not branches inside a single function.
+
+### `rustic-gameplay` emits events; it does not render
+
+`rustic-gameplay` has no dependency on `rustic-render`. It produces events (note hit, miss, health change) that the render layer consumes. Keep this boundary clean.
+
+### `rustic-core` has no rendering or audio dependencies
+
+`rustic-core` holds data types and parsing logic only. It must remain importable by any other crate without pulling in `wgpu`, `kira`, or `winit`.
+
+## Commit discipline
+
+Commit after every meaningful unit of work — a new parser, a working subsystem, a confirmed bug fix. Keep commits small and frequent.
+
+**If something breaks, revert.** Do not spend hours debugging a broken state. Revert to the last working commit and approach the problem differently. A clean history of small working steps is far more valuable than a single large commit that "eventually got it working."
+
+```bash
+# Revert the last commit (keep changes staged)
+git reset --soft HEAD~1
+
+# Discard changes entirely and return to last commit
+git reset --hard HEAD
+```
+
+<Note>
+  Small commits also make blame and bisect useful. When a regression appears in Phase 3, you want to be able to identify the exact commit that introduced it — not search through 800 lines of mixed changes.
+</Note>
+
+## Code style
+
+- Run `cargo clippy` before every commit. Fix all warnings — do not suppress them with `#[allow(...)]` unless there is a documented reason.
+- Run `cargo test` before every commit. A commit that breaks the test suite should not exist in the history.
+- Format with `cargo fmt` to keep diffs clean.
+
+```bash
+cargo fmt
+cargo clippy
+cargo test
+git add .
+git commit -m "your message"
+```

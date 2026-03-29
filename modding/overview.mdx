@@ -1,0 +1,62 @@
+---
+title: 'Modding overview'
+description: 'An introduction to creating Psych Engine-compatible mods for Rustic Engine.'
+keywords: ['modding', 'psych engine', 'friday night funkin', 'lua', 'mod loading']
+---
+
+Rustic Engine supports **Psych Engine-compatible mods** out of the box. If you have a mod that runs in Psych Engine, the same assets, charts, character files, stage files, and Lua scripts are the target format for Rustic Engine mods.
+
+## How mod loading works
+
+Rustic Engine uses a **priority-ordered search path** to resolve assets. When the engine needs a file, it walks through a list of search roots and returns the first match it finds. Your mod directory is inserted at the front of that list, so any file in your mod automatically overrides the corresponding base game file.
+
+```
+mod assets → engine shared → base game shared → base game
+```
+
+This means you can override a single character, a single stage, or a single sound without touching anything else. Files you do not include simply fall through to the base game.
+
+<Note>
+  The engine does not merge JSON files — whichever file is found first wins entirely. If you want to change one field in a character JSON, you must supply the complete character JSON in your mod.
+</Note>
+
+## What a mod can contain
+
+| Component | Description |
+|---|---|
+| **Charts** | Psych Engine JSON chart files defining notes, events, and song metadata |
+| **Characters** | JSON files mapping animation prefixes to atlas frames, with offsets and camera data |
+| **Stages** | JSON files defining background/foreground sprite layers, character positions, and zoom |
+| **Lua scripts** | Song scripts and stage scripts exposing the Psych Engine Lua API |
+| **Images** | PNG spritesheets with matching Sparrow XML atlases |
+| **Sounds & music** | OGG audio files for song instrumentals, vocals, and sound effects |
+
+## Development phases
+
+Modding support is **Phase 5** in the development roadmap. The phases build on each other and must be completed in order:
+
+| Phase | Focus |
+|---|---|
+| Phase 1 | Core + Rendering Foundation — chart parsing, asset loading, atlas rendering, camera |
+| Phase 2 | Gameplay + Audio + HUD — notes, input, scoring, audio sync, countdown |
+| Phase 3 | Characters & Stage — animated sprites, stage backgrounds, camera follow |
+| Phase 4 | Menus — title, main menu, freeplay, story mode |
+| **Phase 5** | **Mods + Lua + Modcharts** — mod directory loading, Lua VM, custom events, modcharts |
+
+## The integration test target
+
+The **VS Retrospecter Part 2** mod is used as the ultimate integration test for modding support. It exercises custom events, modcharts, and complex Lua scripts. When this mod runs correctly, Phase 5 is complete.
+
+## Explore the modding guides
+
+<CardGroup cols={2}>
+  <Card title="Mod structure" icon="folder-open" href="/modding/mod-structure">
+    Directory layout, asset placement, and how the engine discovers mod files.
+  </Card>
+  <Card title="Asset formats" icon="file-code" href="/modding/asset-formats">
+    Sparrow XML atlases, Psych Engine chart JSON, character files, and stage files.
+  </Card>
+  <Card title="Custom events" icon="bolt" href="/modding/custom-events">
+    Define and handle chart events in Lua, including the Wildcard event type.
+  </Card>
+</CardGroup>

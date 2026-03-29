@@ -1,0 +1,130 @@
+---
+title: "Screen state machine"
+description: "How rustic-app manages screen transitions using the Screen trait and a single Box<dyn Screen> slot."
+---
+
+`rustic-app` runs a minimal state machine built on a single `Box<dyn Screen>` field. There is no enum of states, no stack, and no transition table. A screen signals that it wants to hand off control by returning `Some(next_screen)` from `next_screen()`. The app loop replaces `current_screen`, passes the audio engine across if needed, calls `init()` on the new screen, and continues.
+
+## The `Screen` trait
+
+Every screen implements the same interface, defined in `crates/rustic-app/src/screen.rs`:
+
+```rust
+pub trait Screen {
+    fn init(&mut self, gpu: &GpuState);
+    fn handle_key(&mut self, key: KeyCode);
+    fn handle_key_release(&mut self, _key: KeyCode) {}
+    fn update(&mut self, dt: f32);
+    fn draw(&mut self, gpu: &mut GpuState);
+
+    /// Return Some(next) to transition away from this screen.
+    fn next_screen(&mut self) -> Option<Box<dyn Screen>> { None }
+
+    /// Hand the shared audio engine to the next screen.
+    fn take_audio(&mut self) -> Option<AudioEngine> { None }
+
+    /// Receive the shared audio engine from the previous screen.
+    fn set_audio(&mut self, _audio: AudioEngine) {}
+}
+```
+
+The `take_audio` / `set_audio` pair exists for one specific reason: the `freakyMenu` background music that plays on the title screen, main menu, and freeplay should not restart on every transition. The current screen hands its `AudioEngine` to the next one, which adopts it.
+
+## How a transition happens
+
+The entire transition logic lives inside the `RedrawRequested` handler in `main.rs`:
+
+```rust
+// 1. Update the current screen.
+self.current_screen.update(dt);
+
+// 2. Check for a pending transition.
+if let Some(mut next) = self.current_screen.next_screen() {
+    // 3. Pass the audio engine so music doesn't restart.
+    if let Some(audio) = self.current_screen.take_audio() {
+        next.set_audio(audio);
+    }
+    // 4. Initialize the new screen on the GPU.
+    if let Some(gpu) = &self.gpu {
+        next.init(gpu);
+    }
+    // 5. Swap.
+    self.current_screen = next;
+}
+
+// 6. Draw whatever is now current.
+if let Some(gpu) = &mut self.gpu {
+    self.current_screen.draw(gpu);
+}
+```
+
+`next_screen()` is called once per frame. When it returns `None` (the common case), no allocation happens.
+
+## Screens in the codebase
+
+The `screens` module in `crates/rustic-app/src/screens/mod.rs` registers each screen as its own sub-module:
+
+```rust
+pub mod characters;   // Character viewer
+pub mod freeplay;     // Song selection and difficulty picker
+pub mod main_menu;    // Main menu
+pub mod play;         // In-song gameplay (PlayScreen)
+pub mod sprite_test;  // Developer sprite/atlas testing screen
+pub mod title;        // Title screen (entry point)
+```
+
+`main.rs` boots directly into `TitleScreen`:
+
+```rust
+let mut app = App::new(Box::new(TitleScreen::new()));
+event_loop.run_app(&mut app).unwrap();
+```
+
+## Screen transition flow
+
+<Steps>
+  <Step title="Title screen">
+    The engine starts here. `TitleScreen` initialises the GPU, loads the title atlas, and plays `freakyMenu`. When the player presses Enter (or the title sequence completes), it returns a `MainMenuScreen` from `next_screen()`.
+  </Step>
+  <Step title="Main menu">
+    `MainMenuScreen` receives the `AudioEngine` from the title screen so `freakyMenu` keeps playing. The player selects from Freeplay, Story Mode, and other options.
+  </Step>
+  <Step title="Freeplay or story mode">
+    - **Freeplay** (`FreeplayScreen`): song list, difficulty selector, and highscore display. Selecting a song transitions to a loading screen.
+    - **Story mode**: week/story selection. Not yet a separate module in the current `screens/mod.rs`, but planned as part of Phase 4.
+  </Step>
+  <Step title="Loading">
+    A loading screen parses the selected chart via `rustic-core`, loads character and stage definitions, and queues audio assets. When loading is complete it transitions to `PlayScreen`.
+  </Step>
+  <Step title="Playing">
+    `play/` contains the in-song screen. It owns a `PlayState` from `rustic-gameplay`, a `ScriptManager` from `rustic-scripting`, and drives `GpuState` for rendering each frame. On song end (or game over and retry) it transitions to the results screen or back to freeplay.
+  </Step>
+  <Step title="Results">
+    Displays the final score, rating breakdown, and rank. Transitions back to the menu on player input.
+  </Step>
+</Steps>
+
+## Why each screen is its own module
+
+V1 had a monolithic `main.rs` where screens were functions or large `match` arms inside a single file. When freeplay was added, changes to the menu flow broke the play screen. Rust's module system enforces the boundary: the `freeplay` module cannot directly mutate state in the `play` module — all communication goes through the transition protocol (`next_screen`, typed event structs, or shared data passed at construction time).
+
+<Warning>
+  Never put more than one screen's logic inside a single module file. If a screen module grows past ~500 lines, split it into sub-modules. The `play/` directory already uses a sub-module structure for this reason.
+</Warning>
+
+## Adding a new screen
+
+<Steps>
+  <Step title="Create the module file">
+    Add `crates/rustic-app/src/screens/my_screen.rs` and implement the `Screen` trait.
+  </Step>
+  <Step title="Register it in mod.rs">
+    Add `pub mod my_screen;` to `crates/rustic-app/src/screens/mod.rs`.
+  </Step>
+  <Step title="Transition to it">
+    In the screen that should hand off to yours, implement `next_screen()` to return `Some(Box::new(MyScreen::new()))` when the transition condition is met.
+  </Step>
+  <Step title="Pass audio if needed">
+    If your screen should continue playing the current menu music, implement `take_audio()` on the outgoing screen and `set_audio()` on yours.
+  </Step>
+</Steps>

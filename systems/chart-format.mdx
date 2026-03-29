@@ -1,0 +1,281 @@
+---
+title: "Chart format"
+description: "How Rustic Engine parses Psych Engine JSON chart files, including legacy format conversion and the psych_v1 normalized direction scheme."
+---
+
+Rustic Engine reads the standard Psych Engine JSON chart format. Charts are stored as `{ "song": { ... } }` wrapper objects. The `parse_chart()` function deserializes the payload, normalizes legacy direction encoding to `psych_v1`, and returns a flat list of `NoteData` and `EventNote` values sorted by strum time.
+
+## File structure
+
+A chart file contains a single top-level `song` key:
+
+```json chart.json
+{
+  "song": {
+    "song": "Bopeebo",
+    "bpm": 100.0,
+    "speed": 2.7,
+    "needsVoices": true,
+    "player1": "bf",
+    "player2": "dad",
+    "gfVersion": "gf",
+    "stage": "stage",
+    "notes": [ ... ],
+    "events": [ ... ]
+  }
+}
+```
+
+Some older charts double-nest the payload as `{ "song": { "song": { ... } } }`. `parse_chart()` detects this automatically by checking whether the inner value has a `notes` key.
+
+## SwagSong fields
+
+<ParamField path="body.song" type="string" default="">
+  Display name of the song. Null values are treated as an empty string.
+</ParamField>
+
+<ParamField path="body.notes" type="SwagSection[]" required>
+  Array of chart sections. Each section holds a batch of notes and optional per-section BPM changes.
+</ParamField>
+
+<ParamField path="body.events" type="array">
+  Top-level events array. Each entry is `[strum_time, [[name, value1, value2], ...]]`. These are merged with any inline events found inside `sectionNotes`.
+</ParamField>
+
+<ParamField path="body.bpm" type="number" required>
+  Starting BPM of the song. Used to build the conductor's BPM change map.
+</ParamField>
+
+<ParamField path="body.speed" type="number" default="1.0">
+  Note scroll speed multiplier. Higher values scroll faster.
+</ParamField>
+
+<ParamField path="body.offset" type="number" default="0.0">
+  Audio offset in milliseconds applied before gameplay begins.
+</ParamField>
+
+<ParamField path="body.player1" type="string" default="bf">
+  Character key for the player (Boyfriend). Null values fall back to `"bf"`.
+</ParamField>
+
+<ParamField path="body.player2" type="string" default="dad">
+  Character key for the opponent. Null values fall back to `"dad"`.
+</ParamField>
+
+<ParamField path="body.gfVersion" type="string" default="gf">
+  Character key for the girlfriend/spectator. Null values fall back to `"gf"`.
+</ParamField>
+
+<ParamField path="body.stage" type="string" default="stage">
+  Stage key used to look up the stage JSON file.
+</ParamField>
+
+<ParamField path="body.format" type="string" default="">
+  Chart format identifier. `"psych_v1"` and `"psych_v1_convert"` skip the legacy direction-remapping step. Any other value (including an absent field) triggers conversion.
+</ParamField>
+
+<ParamField path="body.needsVoices" type="boolean" default="true">
+  Whether the song has a separate vocals track. When false, only the instrumental is loaded.
+</ParamField>
+
+<ParamField path="body.gameOverChar" type="string" default="">
+  Character override for the game-over screen.
+</ParamField>
+
+<ParamField path="body.gameOverSound" type="string" default="">
+  Sound file override for the game-over death sound.
+</ParamField>
+
+<ParamField path="body.gameOverLoop" type="string" default="">
+  Sound file override for the game-over loop music.
+</ParamField>
+
+<ParamField path="body.gameOverEnd" type="string" default="">
+  Sound file override for the game-over end sound.
+</ParamField>
+
+<ParamField path="body.disableNoteRgb" type="boolean" default="false">
+  Disable RGB color tinting on notes.
+</ParamField>
+
+<ParamField path="body.arrowSkin" type="string" default="">
+  Default note skin override for all strums.
+</ParamField>
+
+<ParamField path="body.splashSkin" type="string" default="">
+  Note splash skin override.
+</ParamField>
+
+<ParamField path="body.arrowSkinDAD" type="string" default="">
+  Opponent note skin override. VS Retrospecter extension.
+</ParamField>
+
+<ParamField path="body.arrowSkinBF" type="string" default="">
+  Player note skin override. VS Retrospecter extension.
+</ParamField>
+
+## SwagSection fields
+
+Each entry in `notes[]` is a `SwagSection`:
+
+<ParamField path="body.sectionNotes" type="array[]" required>
+  Array of note tuples. Each tuple is `[strum_time, direction, sustain_length]` or `[strum_time, direction, sustain_length, note_type]`. Event notes embedded here use a negative or string direction value and carry `[strum_time, event_name, value1, value2]`.
+</ParamField>
+
+<ParamField path="body.sectionBeats" type="number" default="4.0">
+  Number of beats in this section. Used to calculate section length for BPM change maps.
+</ParamField>
+
+<ParamField path="body.mustHitSection" type="boolean" default="false">
+  **Legacy format only.** When `true`, directions 0–3 belong to the player and 4–7 to the opponent. When `false`, the ownership is flipped. After conversion this field is ignored — directions become absolute.
+</ParamField>
+
+<ParamField path="body.altAnim" type="boolean" default="false">
+  When `true`, all notes in this section use the `-alt` animation variant.
+</ParamField>
+
+<ParamField path="body.gfSection" type="boolean" default="false">
+  When `true`, the girlfriend character sings during this section.
+</ParamField>
+
+<ParamField path="body.bpm" type="number" default="0.0">
+  New BPM that takes effect at the start of this section. Only applied when `changeBpm` is `true`.
+</ParamField>
+
+<ParamField path="body.changeBpm" type="boolean" default="false">
+  Whether this section introduces a BPM change.
+</ParamField>
+
+## Format variants
+
+<Tabs>
+  <Tab title="legacy (pre-psych_v1)">
+    Note directions are relative to `mustHitSection`. The same physical lane number means different ownership depending on which section you are in:
+
+    | Direction | mustHitSection = true | mustHitSection = false |
+    |-----------|----------------------|------------------------|
+    | 0–3       | Player               | Opponent               |
+    | 4–7       | Opponent             | Player                 |
+
+    `parse_chart()` calls `convert_to_psych_v1()` automatically for any chart whose `format` field does not start with `"psych_v1"`.
+  </Tab>
+  <Tab title="psych_v1">
+    Directions are absolute. 0–3 always belong to the player; 4–7 always belong to the opponent. `mustHitSection` is preserved in the struct but no longer controls ownership.
+
+    Set `"format": "psych_v1"` (or `"psych_v1_convert"`) to opt out of conversion.
+  </Tab>
+</Tabs>
+
+## Legacy conversion logic
+
+The conversion mirrors `Song.hx` lines 113–114 in Psych Engine:
+
+```rust crates/rustic-core/src/chart.rs
+fn convert_to_psych_v1(song: &mut SwagSong) {
+    for section in &mut song.notes {
+        for sn in &mut section.section_notes {
+            let dir = sn[1].as_f64() as i32;   // original direction
+
+            // Determine true ownership from mustHitSection + direction range
+            let is_player = if dir < 4 {
+                section.must_hit_section         // low dirs belong to hit-section owner
+            } else {
+                !section.must_hit_section        // high dirs belong to the other side
+            };
+
+            // Rewrite to absolute: 0-3 = player, 4-7 = opponent
+            let new_dir = (dir % 4) + if is_player { 0 } else { 4 };
+            sn[1] = serde_json::Value::from(new_dir);
+        }
+    }
+    song.format = "psych_v1".to_string();
+}
+```
+
+After conversion, every note carries an absolute direction. The parser then derives ownership from a simple range check:
+
+```rust
+let must_press = direction < 4;   // 0-3 = player, 4-7 = opponent
+let lane = direction % 4;         // normalize to 0-3 lane index
+```
+
+## parse_chart()
+
+```rust crates/rustic-core/src/chart.rs
+pub fn parse_chart(json_data: &str) -> Result<ParsedChart, ChartError>
+```
+
+Parses a Psych Engine chart JSON string. Returns a `ParsedChart` containing:
+
+<ResponseField name="song" type="SwagSong" required>
+  The deserialized song metadata with defaults applied for any null or missing fields.
+</ResponseField>
+
+<ResponseField name="notes" type="NoteData[]" required>
+  All gameplay notes sorted by `strum_time` ascending. Player notes have `must_press = true`, opponent notes have `must_press = false`.
+</ResponseField>
+
+<ResponseField name="events" type="EventNote[]" required>
+  All chart events (from both `song.events` and inline section events) sorted by `strum_time` ascending. Each event carries a `name`, `value1`, and `value2` string.
+</ResponseField>
+
+### Errors
+
+```rust
+pub enum ChartError {
+    Parse(String),   // JSON deserialization failure
+    NotFound(String) // File not found (raised by callers, not parse_chart itself)
+}
+```
+
+## Separate events file
+
+Some charts ship a companion `events.json` with additional events not embedded in the main chart. Load it with:
+
+```rust
+pub fn parse_events_file(json_data: &str) -> Result<Vec<EventNote>, ChartError>
+```
+
+The function accepts both `{ "song": { "events": [...] } }` and `{ "events": [...] }` layouts.
+
+## Example: full chart round-trip
+
+```json example chart.json
+{
+  "song": {
+    "song": "Test Song",
+    "bpm": 150.0,
+    "speed": 2.0,
+    "player1": "bf",
+    "player2": "dad",
+    "gfVersion": "gf",
+    "stage": "stage",
+    "needsVoices": true,
+    "notes": [
+      {
+        "sectionNotes": [
+          [0.0, 0, 0],
+          [500.0, 5, 200.0],
+          [1000.0, 2, 0, "Alt Animation"]
+        ],
+        "mustHitSection": true,
+        "sectionBeats": 4.0
+      }
+    ],
+    "events": [
+      [2000.0, [["Hey!", "BF", "0.6"]]]
+    ]
+  }
+}
+```
+
+After `parse_chart()`:
+
+- Note at `0ms`: player, lane 0, tap — direction 0 in a `mustHitSection=true` section stays as player lane 0.
+- Note at `500ms`: opponent, lane 1, hold 200ms — direction 5 (`5 % 4 = 1`) is an opponent lane in `psych_v1`.
+- Note at `1000ms`: player, lane 2, `NoteKind::Alt`.
+- Event at `2000ms`: name `"Hey!"`, value1 `"BF"`, value2 `"0.6"`.
+
+<Note>
+  Notes and events are always returned sorted by `strum_time`. You can iterate them in order without a secondary sort step.
+</Note>

@@ -1,0 +1,66 @@
+---
+title: "Introduction"
+description: "Rustic Engine is a from-scratch Rust reimplementation of Psych Engine, the dominant Friday Night Funkin' modding engine."
+---
+
+## What is Rustic Engine?
+
+Rustic Engine (internally RusticV2) is a complete rewrite of [Psych Engine](https://github.com/ShadowMario/FNF-PsychEngine) in Rust. Psych Engine is the most widely used Friday Night Funkin' modding engine, and Rustic Engine aims to replicate its behavior exactly — including its Lua scripting API — while addressing the architectural problems that plagued earlier attempts.
+
+The primary goal is **1:1 feature parity** with Psych Engine. Before any improvements are made, the engine must be capable of running existing Psych Engine mods without modification. This means identical chart parsing, identical hit windows, identical Lua callback signatures, and identical asset format handling.
+
+## Why rewrite it in Rust?
+
+The first attempt (RusticV1) collapsed under its own weight. A monolithic `main.rs` grew to over 2,000 lines, and adding new screens caused cascading breakage across the entire codebase. V2 enforces a strict modular architecture from day one: each crate has a single responsibility, no crate may become a dumping ground, and any module that exceeds ~500 lines is a candidate for splitting.
+
+Rust brings memory safety, predictable performance, and a strong type system — all useful properties for a game engine that must handle precise audio timing, frame-accurate input detection, and complex Lua interop.
+
+## Crate architecture
+
+Rustic Engine is a Cargo workspace. Each crate is isolated and has one job:
+
+| Crate | Responsibility |
+|---|---|
+| `rustic-core` | Data types and parsing only. Chart formats, character/stage definitions, note types, scoring math, asset path resolution. Zero rendering or audio dependencies. |
+| `rustic-audio` | Audio playback via `kira`. Instrumental and vocals sync, sound effects, conductor (BPM and beat tracking). |
+| `rustic-render` | All drawing. Sparrow XML atlas parsing, sprite animation, camera system, note rendering, HUD, countdown visuals, stage rendering. |
+| `rustic-gameplay` | Game logic. Input handling, note hit/miss detection, hold note logic, event system, PlayState loop. Emits events consumed by the render layer — no rendering code lives here. |
+| `rustic-scripting` | Lua VM integration. Exposes the full Psych Engine Lua API: callbacks, property access, sprite manipulation, tweens, camera control. |
+| `rustic-app` | Binary entry point and state machine. Wires all crates together, manages screen transitions across title, menus, freeplay, story mode, loading, playing, and results screens. |
+
+The workspace also includes `rustanimate`, a renderer-agnostic port of `flxanimate` for parsing and playing back Adobe Animate texture atlases.
+
+## Development phases
+
+The engine is built in five sequential phases. Each phase must be playtest-verified before the next begins.
+
+1. **Phase 1 — Core + Rendering Foundation**: Chart parsing, character/stage file loading, conductor/timing, scoring math, asset path resolution. Window creation, Sparrow atlas loading and animation, basic sprite drawing, camera system.
+
+2. **Phase 2 — Gameplay + Audio + HUD**: Note spawning and scrolling, strum line, input detection, hit/miss judgment, hold notes, health and score tracking. Instrumental and vocals sync, conductor-driven timing, sound effects. Health bar, score/combo display, countdown, rating popups, note splashes.
+
+3. **Phase 3 — Characters & Stage**: Animated character sprites (idle, sing directions, miss animations), stage background rendering, camera following the active singer.
+
+4. **Phase 4 — Menus**: Title screen, main menu, freeplay (song list, difficulty select, highscores), story mode. Each menu is its own module — this is where V1 failed.
+
+5. **Phase 5 — Mods + Lua + Modcharts**: Mod directory loading, asset override priority, custom note types and events. Full Lua VM, callback system, property bridge, sprite/tween/camera API. Modchart note manipulation, shader support, video playback, HScript. Integration-tested against VS Retrospecter Part 2.
+
+<Note>
+  All five phases are currently in progress. The codebase is under active development.
+</Note>
+
+## Explore the docs
+
+<CardGroup cols={2}>
+  <Card title="Architecture overview" icon="diagram-project" href="/architecture/overview">
+    How the workspace crates fit together and communicate.
+  </Card>
+  <Card title="Modding guide" icon="puzzle-piece" href="/modding/overview">
+    How to structure mods, override assets, and use custom events.
+  </Card>
+  <Card title="Lua API reference" icon="code" href="/lua-api/overview">
+    The full Psych Engine-compatible Lua scripting API.
+  </Card>
+  <Card title="Chart format" icon="music" href="/systems/chart-format">
+    The Psych Engine JSON chart format used for songs.
+  </Card>
+</CardGroup>

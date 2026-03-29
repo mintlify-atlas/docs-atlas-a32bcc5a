@@ -1,0 +1,183 @@
+---
+title: "Conductor and timing"
+description: "How the Conductor tracks song position in milliseconds and maps it to beats, steps, and sections. All gameplay timing derives from the conductor — never from wall-clock time."
+---
+
+The `Conductor` is the single source of truth for time during gameplay. It tracks the current song position in milliseconds and converts that value into beats, steps, and sections. BPM changes mid-song are fully supported through a pre-built change map.
+
+<Warning>
+  Never derive gameplay timing from wall-clock time or frame delta accumulation. Always read `conductor.song_position`, which is driven by the audio engine's playback position.
+</Warning>
+
+## Core struct
+
+```rust crates/rustic-core/src/conductor.rs
+pub struct Conductor {
+    pub bpm: f64,
+    /// Beat length in ms = (60 / bpm) * 1000
+    pub crochet: f64,
+    /// Step length in ms = crochet / 4
+    pub step_crochet: f64,
+    /// Current song position in milliseconds.
+    pub song_position: f64,
+    /// Map of BPM changes throughout the song.
+    pub bpm_change_map: Vec<BpmChangeEvent>,
+    /// Audio offset in milliseconds.
+    pub offset: f64,
+}
+```
+
+### Terminology
+
+| Term | Definition |
+|------|-----------|
+| **crochet** | Duration of one beat in milliseconds: `(60 / bpm) * 1000` |
+| **step_crochet** | Duration of one step in milliseconds: `crochet / 4` |
+| **step** | The smallest musical subdivision. There are 4 steps per beat. |
+| **beat** | One quarter-note. There are typically 4 beats per section. |
+| **section** | A group of beats, usually 4 (16 steps). Sections control camera targets and character animations. |
+
+At 120 BPM:
+- `crochet` = 500 ms/beat
+- `step_crochet` = 125 ms/step
+- One section (16 steps) = 2000 ms
+
+## Creating a conductor
+
+```rust
+let mut conductor = Conductor::new(120.0);
+// conductor.crochet      == 500.0
+// conductor.step_crochet == 125.0
+```
+
+Update the BPM at any time with `set_bpm()`, which recalculates `crochet` and `step_crochet`:
+
+```rust
+conductor.set_bpm(180.0);
+// conductor.crochet      == 333.33...
+// conductor.step_crochet == 83.33...
+```
+
+## Mapping time to beats and steps
+
+The conductor exposes continuous (floating-point) queries that account for all BPM changes:
+
+```rust
+// Continuous step number at a given song position
+pub fn get_step(&self, time: f64) -> f64
+
+// Continuous beat number (= step / 4)
+pub fn get_beat(&self, time: f64) -> f64
+
+// Active BPM at a given song position
+pub fn get_bpm_at(&self, time: f64) -> f64
+
+// Step duration (ms) at a given song position
+pub fn get_step_crochet_at(&self, time: f64) -> f64
+```
+
+Integer convenience helpers read from `conductor.song_position`:
+
+```rust
+pub fn cur_step(&self) -> i32       // = get_step(song_position) as i32
+pub fn cur_beat(&self) -> i32       // = get_beat(song_position) as i32
+pub fn cur_section(&self, steps_per_section: i32) -> i32  // = cur_step / steps_per_section
+```
+
+### Example
+
+```rust
+let conductor = Conductor::new(120.0);
+
+// At 500ms with 120 BPM:
+let step = conductor.get_step(500.0);  // 4.0  (one beat = 4 steps)
+let beat = conductor.get_beat(500.0);  // 1.0
+```
+
+## Mid-song BPM changes
+
+Build the BPM change map once after loading the chart by passing an iterator of `(change_bpm, bpm, section_beats)` tuples — one per chart section:
+
+```rust
+conductor.map_bpm_changes(
+    song.bpm,
+    song.notes.iter().map(|s| (s.change_bpm, s.bpm, s.section_beats)),
+);
+```
+
+The map stores each change as a `BpmChangeEvent`:
+
+```rust
+pub struct BpmChangeEvent {
+    pub step_time: f64,   // step number where this BPM takes effect
+    pub song_time: f64,   // song position in ms where this BPM takes effect
+    pub bpm: f64,
+    pub step_crochet: f64, // pre-computed step length at this BPM
+}
+```
+
+`get_step()` walks the change map to find the last change before the requested time, then interpolates forward from that anchor:
+
+```rust
+last_change_step + (time - last_change_time) / last_step_crochet
+```
+
+This means step counts remain accurate across BPM changes without any floating-point drift.
+
+### Example: two-section chart
+
+```rust
+let mut conductor = Conductor::new(120.0);
+conductor.map_bpm_changes(120.0, vec![
+    (false, 120.0, 4.0),   // section 0: 120 BPM, 4 beats
+    (true,  180.0, 4.0),   // section 1: changes to 180 BPM
+]);
+
+// Section 0 at 120 BPM = 16 steps × 125ms = 2000ms
+let change_time = conductor.bpm_change_map[0].song_time; // 2000.0
+
+// 500ms into section 1 at 180 BPM (step_crochet ≈ 83.3ms)
+let step = conductor.get_step(change_time + 500.0); // ≈ 22.0
+```
+
+## Updating song position
+
+Each game frame, write the audio engine's playback position to `conductor.song_position`:
+
+```rust
+conductor.song_position = audio_engine.position_ms();
+```
+
+The audio engine's `position_ms()` reads from the instrumental track handle, making the instrumental the single authoritative clock. All gameplay callbacks (`onBeatHit`, `onStepHit`, etc.) fire based on transitions in `conductor.cur_beat()` and `conductor.cur_step()`.
+
+## Beat and step callbacks
+
+Compare the conductor's current beat/step each frame against the last-fired value to detect transitions:
+
+```rust
+let new_beat = conductor.cur_beat();
+if new_beat > last_beat {
+    last_beat = new_beat;
+    on_beat_hit(new_beat);  // fire camera zoom pulse, character bop, etc.
+}
+
+let new_step = conductor.cur_step();
+if new_step > last_step {
+    last_step = new_step;
+    on_step_hit(new_step);
+}
+```
+
+## Section tracking
+
+Divide `cur_step()` by the number of steps per section (usually 16 for a 4-beat section with 4 steps per beat):
+
+```rust
+let section = conductor.cur_section(16);
+```
+
+Section changes are used to switch camera targets between the player and opponent characters.
+
+<Tip>
+  Store `section_beats` per section and multiply by 4 to get steps per section. Most charts use 4.0 section beats (16 steps), but some songs change this.
+</Tip>

@@ -1,0 +1,269 @@
+---
+title: "Rendering system"
+description: "wgpu-based GPU rendering with Sparrow XML sprite atlases, animation playback, a batched sprite pipeline, text rendering via glyphon, and a post-processing pass."
+---
+
+The `rustic-render` crate handles all drawing. It builds on `wgpu` for GPU access and implements a batched sprite pipeline that flushes to the GPU in texture-grouped draw calls. Text is rendered via `glyphon`. A post-processing pass sits between the scene framebuffer and the swap chain.
+
+## Sparrow XML atlas format
+
+Character and UI sprites are packed into Sparrow-format texture atlases. Each atlas is a PNG image paired with an XML file. The XML lists every frame as a `<SubTexture>` element:
+
+```xml example.xml
+<TextureAtlas imagePath="boyfriend.png">
+  <SubTexture name="BF idle dance0001" x="0" y="0" width="150" height="220"
+              frameX="-25" frameY="-10" frameWidth="200" frameHeight="240"/>
+  <SubTexture name="BF idle dance0002" x="150" y="0" width="152" height="218"
+              frameX="-24" frameY="-8" frameWidth="200" frameHeight="240"/>
+  <SubTexture name="BF idle dance0003" x="302" y="0" width="148" height="222"
+              frameX="-26" frameY="-12" frameWidth="200" frameHeight="240"/>
+  <!-- rotated frame example -->
+  <SubTexture name="note left0000" x="0" y="500" width="157" height="157"
+              rotated="true"/>
+</TextureAtlas>
+```
+
+### SubTexture attributes
+
+<ResponseField name="name" type="string" required>
+  Frame name. Trailing digits identify the frame index within an animation sequence.
+</ResponseField>
+
+<ResponseField name="x" type="number" required>
+  Left edge of the source rectangle in the atlas texture, in pixels.
+</ResponseField>
+
+<ResponseField name="y" type="number" required>
+  Top edge of the source rectangle in the atlas texture, in pixels.
+</ResponseField>
+
+<ResponseField name="width" type="number" required>
+  Width of the source rectangle in pixels.
+</ResponseField>
+
+<ResponseField name="height" type="number" required>
+  Height of the source rectangle in pixels.
+</ResponseField>
+
+<ResponseField name="frameX" type="number">
+  Horizontal offset from the frame origin to the source rect, in pixels. Negative means the sprite is trimmed on the left.
+</ResponseField>
+
+<ResponseField name="frameY" type="number">
+  Vertical offset from the frame origin to the source rect, in pixels.
+</ResponseField>
+
+<ResponseField name="frameWidth" type="number">
+  Logical width of the full (untrimmed) frame. Defaults to `width` when absent.
+</ResponseField>
+
+<ResponseField name="frameHeight" type="number">
+  Logical height of the full (untrimmed) frame. Defaults to `height` when absent.
+</ResponseField>
+
+<ResponseField name="rotated" type="boolean" default="false">
+  When `true`, the source rect is stored rotated 90° clockwise in the atlas. The renderer un-rotates it at draw time.
+</ResponseField>
+
+## SpriteAtlas
+
+```rust crates/rustic-render/src/sprites.rs
+pub struct SpriteAtlas {
+    raw_frames: Vec<RawFrame>,
+    pub animations: HashMap<String, Vec<SpriteFrame>>,
+}
+```
+
+Parse an atlas from its XML string:
+
+```rust
+let atlas = SpriteAtlas::from_xml(xml_string);
+```
+
+### Animation registration
+
+Animations are registered by prefix — matching how HaxeFlixel's `addByPrefix` works:
+
+```rust
+// Register all frames whose name starts with "BF idle dance" as the "idle" animation.
+atlas.add_by_prefix("idle", "BF idle dance");
+
+// Register specific frame indices.
+atlas.add_by_indices("singLEFT", "BF NOTE LEFT", &[0, 1, 2, 3]);
+```
+
+`add_by_prefix` strips the prefix from each matching frame name, parses the remaining digits as a frame index, sorts by index, and stores the resulting `SpriteFrame` slice under `anim_name`. Frames without trailing digits are treated as index 0.
+
+### Animation name derivation
+
+When character JSON files list animation prefixes, the engine derives the animation name by passing the prefix string to `add_by_prefix`. The trailing digit stripping happens inside the method — you never need to strip digits manually.
+
+### Querying frames
+
+```rust
+atlas.get_frame("idle", frame_index) -> Option<&SpriteFrame>
+atlas.frame_count("idle") -> usize
+atlas.has_anim("idle") -> bool
+atlas.anim_names() -> Vec<&str>
+```
+
+`get_frame` wraps `frame_index` with modulo so you can pass a raw accumulated counter without clamping.
+
+## SpriteFrame
+
+Each registered frame carries the data needed by the GPU renderer:
+
+```rust crates/rustic-render/src/sprites.rs
+pub struct SpriteFrame {
+    pub src: Rect,        // source rectangle in the atlas texture
+    pub offset_x: f32,   // frameX offset
+    pub offset_y: f32,   // frameY offset
+    pub frame_w: f32,    // logical (untrimmed) frame width
+    pub frame_h: f32,    // logical (untrimmed) frame height
+    pub rotated: bool,   // true if stored 90° CW in atlas
+}
+```
+
+## AnimationController
+
+```rust crates/rustic-render/src/sprites.rs
+pub struct AnimationController {
+    pub current_anim: String,
+    pub frame_index: usize,
+    pub fps: f32,
+    pub looping: bool,
+    pub finished: bool,
+}
+```
+
+Update the controller each frame and feed it to `get_frame`:
+
+```rust
+controller.play("idle", 24.0, true);     // start or continue
+controller.force_play("singLEFT", 24.0, false); // restart unconditionally
+controller.update(dt, atlas.frame_count("idle"));
+
+let frame = atlas.get_frame(&controller.current_anim, controller.frame_index);
+```
+
+`play()` only resets if the animation name changes or the previous animation finished. `force_play()` always resets to frame 0.
+
+## GPU backend (GpuState)
+
+```rust crates/rustic-render/src/gpu.rs
+pub struct GpuState { ... }
+```
+
+`GpuState` owns the wgpu device, queue, surface, and sprite pipeline. It pre-allocates vertex and index buffers for up to **4096 sprites** per batch:
+
+```rust
+const MAX_SPRITES: usize = 4096;
+const MAX_VERTICES: usize = MAX_SPRITES * 4;  // 16384
+const MAX_INDICES: usize = MAX_SPRITES * 6;   // 24576
+```
+
+### Initialization
+
+```rust
+let gpu = GpuState::new(window_arc, game_w, game_h).await;
+```
+
+The engine uses a fixed logical resolution (`game_w × game_h`). The renderer letterboxes the output within the window, preserving aspect ratio.
+
+### Projection
+
+An orthographic projection maps `(0, 0)–(game_w, game_h)` to clip space with Y going down (screen convention):
+
+```rust
+fn ortho_projection(w: f32, h: f32) -> Projection {
+    Projection {
+        matrix: [
+            [2.0 / w,  0.0,     0.0, 0.0],
+            [0.0,     -2.0 / h, 0.0, 0.0],
+            [0.0,      0.0,     1.0, 0.0],
+            [-1.0,     1.0,     0.0, 1.0],
+        ],
+    }
+}
+```
+
+### Sprite vertex format
+
+```rust crates/rustic-render/src/gpu.rs
+#[repr(C)]
+pub struct SpriteVertex {
+    pub position: [f32; 2],  // game-space pixels
+    pub uv: [f32; 2],        // normalized texture coordinates
+    pub color: [f32; 4],     // RGBA multiplier
+}
+```
+
+### Drawing sprites
+
+```rust
+// Draw from a SpriteFrame
+gpu.draw_sprite_frame(&frame, tex_w, tex_h, x, y, scale, flip_x, color);
+
+// Draw flipped vertically (for floor reflections)
+gpu.draw_sprite_frame_flip_y(&frame, tex_w, tex_h, x, y, scale, flip_x, color);
+
+// Draw with rotation (angle in degrees, around frame center)
+gpu.draw_sprite_frame_rotated(&frame, tex_w, tex_h, x, y, scale, flip_x, angle_deg, color);
+
+// Draw a solid-colored quad (no texture)
+gpu.push_colored_quad(x, y, w, h, color);
+```
+
+Frame offsets (`frameX`, `frameY`) are applied during drawing to position the visible sprite correctly within its logical bounding box.
+
+### Texture loading
+
+```rust
+let texture: GpuTexture = gpu.load_texture_from_path(Path::new("assets/sprites/bf.png"));
+```
+
+Images are loaded via the `image` crate, converted to RGBA8, and **alpha-premultiplied** before upload to eliminate white fringing on transparent edges. The pipeline uses `PREMULTIPLIED_ALPHA_BLENDING`.
+
+### Multi-batch frame rendering
+
+For a scene with multiple texture layers (background sprites, character sprites, notes, HUD) use the multi-batch API:
+
+```rust
+gpu.begin_frame();
+
+// Background layer
+gpu.draw_sprite_frame(...);  // accumulate background quads
+gpu.draw_batch(Some(&bg_texture));
+
+// Character layer
+gpu.draw_sprite_frame(...);  // accumulate character quads
+gpu.draw_batch(Some(&char_texture));
+
+// HUD layer (no texture — uses colored quads and text)
+gpu.push_colored_quad(...);
+gpu.draw_text("Score: 0", 10.0, 10.0, 20.0, [1.0, 1.0, 1.0, 1.0]);
+
+gpu.end_frame();  // flush remaining colored quads, render text, present
+```
+
+Each `draw_batch()` call issues one draw call and clears the vertex buffer, so you can use more than 4096 sprites per frame by splitting across batches.
+
+## Text rendering
+
+Text is rendered via `glyphon` through the `TextSystem` embedded in `GpuState`:
+
+```rust
+gpu.draw_text(text, x, y, size, color);
+```
+
+Text is queued during the frame and rendered in a single pass at `end_frame()`, on top of all sprite batches.
+
+## Post-processing
+
+A `PostProcessor` sits between the offscreen render target and the swap chain surface. Enable it before `begin_frame()`:
+
+```rust
+gpu.set_postprocess_active(true);
+```
+
+When active, the scene renders to an offscreen texture. At `end_frame()`, `PostProcessor::apply()` samples the offscreen texture and writes to the surface, applying any active effects (such as a chromatic aberration or vignette shader).

@@ -1,0 +1,167 @@
+---
+title: "Audio system"
+description: "kira-based audio playback for instrumental and vocal tracks, conductor synchronization, miss sounds, and one-shot sound effects."
+---
+
+The `rustic-audio` crate wraps [kira](https://github.com/tesselode/kira) to provide all audio playback for Rustic Engine. It manages up to three simultaneous song tracks (instrumental, player vocals, opponent vocals), miss sound effects, and one-shot sound effects. It exposes a single playback position that the conductor reads each frame.
+
+## AudioEngine struct
+
+```rust crates/rustic-audio/src/lib.rs
+pub struct AudioEngine {
+    manager: AudioManager,
+    inst: Option<StaticSoundHandle>,
+    vocals_player: Option<StaticSoundHandle>,
+    vocals_opponent: Option<StaticSoundHandle>,
+    playing: bool,
+    miss_sounds: Vec<StaticSoundData>,
+    miss_index: usize,
+    loop_music: Option<StaticSoundHandle>,
+}
+```
+
+Create one `AudioEngine` per gameplay session:
+
+```rust
+let mut audio = AudioEngine::new();
+```
+
+## Loading song tracks
+
+Load tracks before starting playback. Each track is paused immediately after loading — you start them together with `play()`:
+
+```rust
+audio.load_inst(Path::new("assets/songs/bopeebo/Inst.ogg"));
+audio.load_vocals(Path::new("assets/songs/bopeebo/Voices.ogg"));
+audio.load_opponent_vocals(Path::new("assets/songs/bopeebo/Voices-opponent.ogg"));
+```
+
+`load_vocals()` and `load_opponent_vocals()` silently skip loading if the file does not exist, so you do not need to guard these calls behind a `needs_voices` check — the engine handles it gracefully.
+
+<Note>
+  All audio files must be in OGG Vorbis format. kira's `StaticSoundData::from_file` handles decoding.
+</Note>
+
+## Playback control
+
+```rust
+audio.play();    // resume all loaded tracks simultaneously
+audio.pause();   // pause all tracks simultaneously
+```
+
+All tracks start and pause together, keeping them in sync. If only the instrumental is loaded (when `needs_voices = false`), the vocal handles are simply absent and the calls are no-ops.
+
+## Conductor synchronization
+
+The instrumental track is the authoritative time source:
+
+```rust
+pub fn position_ms(&self) -> f64 {
+    self.inst
+        .as_ref()
+        .map(|h| h.position() * 1000.0)
+        .unwrap_or(0.0)
+}
+```
+
+Each frame, write this value to `conductor.song_position`:
+
+```rust
+conductor.song_position = audio.position_ms();
+```
+
+This ensures all beat/step/section callbacks derive from the actual audio playback position rather than accumulated frame time, which would drift over the course of a song.
+
+## Vocals muting
+
+Player vocals are muted on note miss and unmuted on a successful hit, matching Psych Engine's behavior:
+
+```rust
+audio.mute_player_vocals();    // set player vocals volume to 0.0
+audio.unmute_player_vocals();  // set player vocals volume to 1.0
+```
+
+The opponent vocals track is never muted — the opponent always "sings" regardless of player input.
+
+## Miss sounds
+
+Load the three Psych Engine miss sound effects from a directory:
+
+```rust
+audio.load_miss_sounds(Path::new("assets/sounds"));
+// Loads missnote1.ogg, missnote2.ogg, missnote3.ogg
+```
+
+Play a miss sound on each note miss. The engine cycles through the three sounds in order:
+
+```rust
+audio.play_miss_sound();
+```
+
+## One-shot sound effects
+
+Play any OGG file as a one-shot effect at a given volume:
+
+```rust
+audio.play_sound(Path::new("assets/sounds/countdown3.ogg"), 1.0);
+```
+
+The file is decoded and played immediately. If the path does not exist the call is silently ignored.
+
+## Looping background music
+
+For screens that need looping music (such as the game-over screen), use the loop music API:
+
+```rust
+// Play at full volume
+audio.play_loop_music(Path::new("assets/music/gameOver.ogg"));
+
+// Play at a specific volume
+audio.play_loop_music_vol(Path::new("assets/music/gameOver.ogg"), 0.8);
+
+// Stop the loop
+audio.stop_loop_music();
+```
+
+`play_loop_music()` stops any currently playing loop before starting the new one, so you do not need to call `stop_loop_music()` explicitly before switching tracks.
+
+## Seeking
+
+Seek all tracks to a position simultaneously:
+
+```rust
+audio.seek(position_ms);
+```
+
+All three tracks (instrumental, player vocals, opponent vocals) are seeked to the same millisecond position, keeping them in sync after a manual time jump.
+
+## Playback state
+
+```rust
+audio.is_playing() -> bool    // true between play() and pause()
+audio.is_finished() -> bool   // true when the instrumental has reached its end
+```
+
+Use `is_finished()` in the game loop to detect song end and transition to the results screen.
+
+## Integration example
+
+The following shows the typical per-frame update pattern inside the gameplay loop:
+
+```rust
+// 1. Update conductor from audio position
+conductor.song_position = audio.position_ms();
+
+// 2. Check beat transitions
+let new_beat = conductor.cur_beat();
+if new_beat > last_beat {
+    last_beat = new_beat;
+    game_camera.bump_zoom(0.03);
+    hud_camera.bump_zoom(0.05);
+}
+
+// 3. Check for song end
+if audio.is_finished() {
+    transition_to_results();
+}
+```

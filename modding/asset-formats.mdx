@@ -1,0 +1,553 @@
+---
+title: 'Asset formats'
+description: 'Reference for every file format Rustic Engine reads: Sparrow XML atlases, Psych Engine chart JSON, character JSON, and stage JSON.'
+keywords: ['sparrow xml', 'atlas', 'chart json', 'character json', 'stage json', 'psych engine']
+---
+
+Rustic Engine reads four primary asset formats. All of them are the same formats used by Psych Engine, so existing mods and tools work without conversion.
+
+## Sprite atlases
+
+Sprites are packed into PNG spritesheets with **Sparrow XML** sidecar files (the format produced by TexturePacker). Each atlas consists of a `.png` image and a `.xml` file with the same base name, placed in the `images/` directory.
+
+### XML structure
+
+```xml
+<TextureAtlas imagePath="BOYFRIEND.png">
+  <SubTexture name="BF idle dance0000" x="0" y="0" width="154" height="183"
+    frameX="-27" frameY="-5" frameWidth="214" frameHeight="204"/>
+  <SubTexture name="BF idle dance0001" x="154" y="0" width="160" height="186"
+    frameX="-24" frameY="-2" frameWidth="214" frameHeight="204"/>
+  <SubTexture name="BF NOTE LEFT0000" x="0" y="183" width="130" height="173"
+    frameX="-20" frameY="0" frameWidth="214" frameHeight="204"/>
+</TextureAtlas>
+```
+
+### SubTexture attributes
+
+<ParamField path="SubTexture.name" type="string" required>
+  Frame name including a zero-padded index suffix (e.g. `BF idle dance0000`). The engine strips trailing digits to derive the animation prefix (`BF idle dance`).
+</ParamField>
+
+<ParamField path="SubTexture.x" type="number" required>
+  X position of the frame within the spritesheet, in pixels.
+</ParamField>
+
+<ParamField path="SubTexture.y" type="number" required>
+  Y position of the frame within the spritesheet, in pixels.
+</ParamField>
+
+<ParamField path="SubTexture.width" type="number" required>
+  Width of the source frame region, in pixels.
+</ParamField>
+
+<ParamField path="SubTexture.height" type="number" required>
+  Height of the source frame region, in pixels.
+</ParamField>
+
+<ParamField path="SubTexture.frameX" type="number" default="0">
+  Horizontal offset applied when placing the trimmed frame back into the original canvas. Typically negative, representing trimmed left margin.
+</ParamField>
+
+<ParamField path="SubTexture.frameY" type="number" default="0">
+  Vertical offset applied when placing the trimmed frame back into the original canvas. Typically negative, representing trimmed top margin.
+</ParamField>
+
+<ParamField path="SubTexture.frameWidth" type="number">
+  Width of the original (untrimmed) canvas for this frame. Omit if no trimming was applied.
+</ParamField>
+
+<ParamField path="SubTexture.frameHeight" type="number">
+  Height of the original (untrimmed) canvas for this frame. Omit if no trimming was applied.
+</ParamField>
+
+<ParamField path="SubTexture.rotated" type="boolean" default="false">
+  Whether the frame was rotated 90 degrees clockwise in the sheet.
+</ParamField>
+
+### Animation name derivation
+
+The engine groups frames into animations by stripping trailing digits from each `SubTexture` name:
+
+- `BF idle dance0000` → animation prefix `BF idle dance`
+- `BF NOTE LEFT0000` → animation prefix `BF NOTE LEFT`
+
+A character JSON then maps these prefixes to named animations (see [character format](#characters) below).
+
+---
+
+## Charts
+
+Charts use the **Psych Engine JSON format**. The file is wrapped in a top-level `"song"` object.
+
+### Outer wrapper
+
+```json
+{
+  "song": {
+    "song": "Bopeebo",
+    "bpm": 100.0,
+    ...
+  }
+}
+```
+
+The engine also handles the double-nested form `{ "song": { "song": { ... } } }` produced by some older editors.
+
+### Song fields
+
+<ParamField path="body.song" type="string">
+  Song name used for display and asset lookup.
+</ParamField>
+
+<ParamField path="body.bpm" type="number" required>
+  Starting BPM. Individual sections can override this with `changeBPM` + `bpm`.
+</ParamField>
+
+<ParamField path="body.speed" type="number" default="1.0">
+  Note scroll speed multiplier.
+</ParamField>
+
+<ParamField path="body.offset" type="number" default="0">
+  Global audio offset in milliseconds applied to all note timing.
+</ParamField>
+
+<ParamField path="body.player1" type="string" default="bf">
+  Character name for the player (boyfriend) slot.
+</ParamField>
+
+<ParamField path="body.player2" type="string" default="dad">
+  Character name for the opponent slot.
+</ParamField>
+
+<ParamField path="body.gfVersion" type="string" default="gf">
+  Character name for the girlfriend slot.
+</ParamField>
+
+<ParamField path="body.stage" type="string" default="stage">
+  Stage name. The engine loads `stages/{stage}.json`.
+</ParamField>
+
+<ParamField path="body.needsVoices" type="boolean" default="true">
+  Whether the song has a separate vocals track (`Voices.ogg`).
+</ParamField>
+
+<ParamField path="body.format" type="string">
+  Format identifier. When set to `psych_v1` or `psych_v1_convert`, note directions are treated as absolute (0–3 = player, 4–7 = opponent) and the legacy direction-flip conversion is skipped.
+</ParamField>
+
+<ParamField path="body.notes" type="object[]" required>
+  Array of chart sections. See section format below.
+</ParamField>
+
+<ParamField path="body.events" type="array">
+  Top-level events array. See events format below.
+</ParamField>
+
+<ParamField path="body.arrowSkin" type="string">
+  Custom note skin path override for both sides.
+</ParamField>
+
+<ParamField path="body.arrowSkinDAD" type="string">
+  Custom note skin override for the opponent side (VS Retrospecter extension).
+</ParamField>
+
+<ParamField path="body.arrowSkinBF" type="string">
+  Custom note skin override for the player side (VS Retrospecter extension).
+</ParamField>
+
+### Section format
+
+Each entry in the `notes` array is a section:
+
+```json
+{
+  "sectionNotes": [
+    [0.0, 0, 0],
+    [500.0, 5, 200.0],
+    [1000.0, 2, 0, "Alt Animation"]
+  ],
+  "mustHitSection": true,
+  "sectionBeats": 4.0,
+  "altAnim": false,
+  "gfSection": false,
+  "bpm": 0.0,
+  "changeBPM": false
+}
+```
+
+<ParamField path="body.sectionNotes" type="array[]" required>
+  Array of individual notes. Each note is a JSON array: `[strum_time, direction, sustain_length]` or `[strum_time, direction, sustain_length, note_type]`.
+</ParamField>
+
+<ParamField path="body.mustHitSection" type="boolean" default="false">
+  In legacy (non-`psych_v1`) charts, controls how directions 0–7 are remapped to player vs opponent. In `psych_v1` charts this field is ignored for direction calculation.
+</ParamField>
+
+<ParamField path="body.sectionBeats" type="number" default="4.0">
+  Number of beats in this section.
+</ParamField>
+
+<ParamField path="body.altAnim" type="boolean" default="false">
+  If `true`, all notes in this section use the alternate character animation.
+</ParamField>
+
+<ParamField path="body.gfSection" type="boolean" default="false">
+  If `true`, all notes in this section animate the girlfriend character instead.
+</ParamField>
+
+<ParamField path="body.changeBPM" type="boolean" default="false">
+  If `true`, the `bpm` field takes effect at the start of this section.
+</ParamField>
+
+### Note format
+
+Each note inside `sectionNotes` is a JSON array:
+
+```json
+[strum_time, direction, sustain_length, note_type?]
+```
+
+| Index | Field | Type | Description |
+|---|---|---|---|
+| 0 | `strum_time` | number | Note spawn time in milliseconds |
+| 1 | `direction` | number | 0–7. In `psych_v1`: 0–3 = player lanes (left/down/up/right), 4–7 = opponent lanes |
+| 2 | `sustain_length` | number | Hold note length in milliseconds. `0` = tap note |
+| 3 | `note_type` | string | Optional. Built-in values: `"Alt Animation"`, `"Hey!"`, `"Hurt Note"`, `"GF Sing"`, `"No Animation"`. Any other string is a custom note type |
+
+### Events format
+
+Events in the top-level `events` array use this structure:
+
+```json
+[
+  2000.0,
+  [
+    ["Hey!", "BF", "0.6"],
+    ["Add Camera Zoom", "0.04", "0.03"]
+  ]
+]
+```
+
+Each entry is `[strum_time, [[name, value1, value2], ...]]`. Multiple events can share the same strum time by listing them together in the inner array.
+
+### psych_v1 vs legacy format
+
+<AccordionGroup>
+  <Accordion title="psych_v1 (modern)">
+    Note directions are **absolute**: `0–3` always refer to player lanes and `4–7` always refer to opponent lanes, regardless of `mustHitSection`. Charts saved by Psych Engine 0.7+ use this format. The `format` field is set to `"psych_v1"` or `"psych_v1_convert"`.
+  </Accordion>
+  <Accordion title="Legacy (no format field)">
+    Note directions are **relative to `mustHitSection`**. When `mustHitSection` is `false`, directions `0–3` belong to the opponent and `4–7` belong to the player. The engine automatically converts these to the absolute layout before processing. Older Psych Engine charts and the base Friday Night Funkin' charts use this format.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Characters
+
+Character files live at `characters/{name}.json`.
+
+### Example
+
+```json
+{
+  "animations": [
+    {
+      "anim": "idle",
+      "name": "BF idle dance",
+      "fps": 24,
+      "loop": false,
+      "indices": [],
+      "offsets": [-5, 0]
+    },
+    {
+      "anim": "singLEFT",
+      "name": "BF NOTE LEFT0",
+      "fps": 24,
+      "loop": false,
+      "indices": [],
+      "offsets": [5, -6]
+    },
+    {
+      "anim": "singDOWN",
+      "name": "BF NOTE DOWN0",
+      "fps": 24,
+      "loop": false,
+      "indices": [],
+      "offsets": [-10, -50]
+    }
+  ],
+  "image": "characters/BOYFRIEND",
+  "scale": 1.0,
+  "sing_duration": 4.0,
+  "healthicon": "bf",
+  "position": [0, 350],
+  "camera_position": [0, 0],
+  "flip_x": true,
+  "no_antialiasing": false,
+  "healthbar_colors": [49, 176, 209]
+}
+```
+
+### Top-level fields
+
+<ParamField path="body.animations" type="object[]" required>
+  List of animation entries. See animation fields below.
+</ParamField>
+
+<ParamField path="body.image" type="string">
+  Path to the sprite atlas relative to `images/`, without extension (e.g. `characters/BOYFRIEND`). If empty, the engine falls back to `images["baseSheet"]`.
+</ParamField>
+
+<ParamField path="body.images" type="object">
+  Multi-atlas map of sheet name to image path. The `"baseSheet"` key is the primary atlas. Used when `image` is empty.
+</ParamField>
+
+<ParamField path="body.scale" type="number" default="1.0">
+  Uniform scale multiplier applied to the character sprite.
+</ParamField>
+
+<ParamField path="body.sing_duration" type="number" default="4.0">
+  How many steps the sing animation holds before the character returns to idle.
+</ParamField>
+
+<ParamField path="body.healthicon" type="string">
+  Health icon name. The engine resolves `images/icons/icon-{name}.png` or `images/icons/{name}.png`.
+</ParamField>
+
+<ParamField path="body.position" type="number[]" default="[0, 0]">
+  `[x, y]` spawn position of the character in the stage.
+</ParamField>
+
+<ParamField path="body.camera_position" type="number[]" default="[0, 0]">
+  `[x, y]` camera offset applied when the camera is focusing on this character.
+</ParamField>
+
+<ParamField path="body.flip_x" type="boolean" default="false">
+  Mirror the sprite horizontally. Typically `true` for the player character.
+</ParamField>
+
+<ParamField path="body.no_antialiasing" type="boolean" default="false">
+  Disable bilinear filtering. Use for pixel-art characters.
+</ParamField>
+
+<ParamField path="body.healthbar_colors" type="number[]" default="[161, 161, 161]">
+  `[r, g, b]` color of this character's side of the health bar.
+</ParamField>
+
+<ParamField path="body.vocals_file" type="string">
+  Custom vocals filename stem (without extension) inside `songs/{songName}/`.
+</ParamField>
+
+<ParamField path="body.skin" type="string">
+  Custom note skin path override (e.g. `notes/Notes_Ace`).
+</ParamField>
+
+<ParamField path="body.healthBarImg" type="string">
+  Custom health bar image name. Resolves to `healthBars/{name}/bar.png`.
+</ParamField>
+
+<ParamField path="body.stage_scale" type="object">
+  Per-stage scale overrides. Keys are stage names (e.g. `"nightflaid": 0.774`).
+</ParamField>
+
+<ParamField path="body.stage_camera" type="object">
+  Per-stage camera offset overrides. Keys are stage names, values are `[x, y]`.
+</ParamField>
+
+### Animation fields
+
+Each entry in the `animations` array:
+
+<ParamField path="body.anim" type="string" required>
+  Internal animation name used by the engine (e.g. `idle`, `singLEFT`, `singDOWN`, `singUP`, `singRIGHT`, `singLEFTmiss`).
+</ParamField>
+
+<ParamField path="body.name" type="string" required>
+  Sparrow XML prefix to match (trailing digits are stripped automatically). For example, `"BF NOTE LEFT0"` matches frames named `BF NOTE LEFT0000`, `BF NOTE LEFT0001`, etc.
+</ParamField>
+
+<ParamField path="body.fps" type="number" default="24">
+  Playback speed in frames per second.
+</ParamField>
+
+<ParamField path="body.loop" type="boolean" default="false">
+  Whether the animation loops when it reaches the last frame.
+</ParamField>
+
+<ParamField path="body.indices" type="number[]">
+  Optional subset of frame indices to play. Empty array plays all frames in sequence.
+</ParamField>
+
+<ParamField path="body.offsets" type="number[]" default="[0, 0]">
+  `[x, y]` pixel offset applied when this animation is active.
+</ParamField>
+
+<Tip>
+  The engine looks for `danceLeft` in the animation list to determine whether a character uses the two-step idle (`danceLeft` / `danceRight`) instead of a single `idle` animation.
+</Tip>
+
+---
+
+## Stages
+
+Stage files live at `stages/{name}.json`.
+
+### Example
+
+```json
+{
+  "directory": "",
+  "defaultZoom": 0.9,
+  "isPixelStage": false,
+  "boyfriend": [770, 100],
+  "girlfriend": [400, 130],
+  "opponent": [100, 100],
+  "hide_girlfriend": false,
+  "camera_boyfriend": [0, 0],
+  "camera_opponent": [0, 0],
+  "camera_girlfriend": [0, 0],
+  "camera_speed": 1.0,
+  "disableZooming": false,
+  "objects": [
+    {
+      "type": "sprite",
+      "name": "stageback",
+      "image": "stageback",
+      "x": -600,
+      "y": -200,
+      "scale": [1.0, 1.0],
+      "scroll": [0.9, 0.9],
+      "alpha": 1.0,
+      "color": "#FFFFFF",
+      "angle": 0.0,
+      "flipX": false,
+      "flipY": false,
+      "antialiasing": true,
+      "animations": [],
+      "firstAnimation": ""
+    }
+  ]
+}
+```
+
+### Stage fields
+
+<ParamField path="body.directory" type="string" default="">
+  Subdirectory name under the search roots used to locate stage images. Leave empty to use the root `images/` path.
+</ParamField>
+
+<ParamField path="body.defaultZoom" type="number" default="0.9">
+  Initial camera zoom when the song starts.
+</ParamField>
+
+<ParamField path="body.isPixelStage" type="boolean" default="false">
+  Disables antialiasing on all stage objects and characters for pixel-art stages.
+</ParamField>
+
+<ParamField path="body.boyfriend" type="number[]" default="[770, 100]">
+  `[x, y]` spawn position for the player character.
+</ParamField>
+
+<ParamField path="body.girlfriend" type="number[]" default="[400, 130]">
+  `[x, y]` spawn position for the girlfriend character.
+</ParamField>
+
+<ParamField path="body.opponent" type="number[]" default="[100, 100]">
+  `[x, y]` spawn position for the opponent character.
+</ParamField>
+
+<ParamField path="body.hide_girlfriend" type="boolean" default="false">
+  If `true`, the girlfriend character is not shown on this stage.
+</ParamField>
+
+<ParamField path="body.camera_boyfriend" type="number[]" default="[0, 0]">
+  `[x, y]` camera offset applied when the camera focuses on the player.
+</ParamField>
+
+<ParamField path="body.camera_opponent" type="number[]" default="[0, 0]">
+  `[x, y]` camera offset applied when the camera focuses on the opponent.
+</ParamField>
+
+<ParamField path="body.camera_girlfriend" type="number[]" default="[0, 0]">
+  `[x, y]` camera offset applied when the camera focuses on the girlfriend.
+</ParamField>
+
+<ParamField path="body.camera_speed" type="number" default="1.0">
+  Multiplier for how fast the camera moves toward its target.
+</ParamField>
+
+<ParamField path="body.camera_start" type="number[]">
+  Optional `[x, y]` starting camera position. When set, the camera opens here instead of focusing on the opponent.
+</ParamField>
+
+<ParamField path="body.disableZooming" type="boolean" default="false">
+  If `true`, disables beat-driven camera zoom pulses on this stage.
+</ParamField>
+
+<ParamField path="body.objects" type="object[]">
+  Array of sprite objects to draw as the stage background and foreground.
+</ParamField>
+
+### Stage object fields
+
+<ParamField path="body.type" type="string">
+  Object type identifier. Use `"sprite"` for standard image sprites.
+</ParamField>
+
+<ParamField path="body.name" type="string">
+  Unique name for the object. Lua scripts can reference objects by this name.
+</ParamField>
+
+<ParamField path="body.image" type="string">
+  Image path relative to `images/` (and optionally the stage `directory`), without extension.
+</ParamField>
+
+<ParamField path="body.x" type="number" default="0">
+  Horizontal position in the stage world.
+</ParamField>
+
+<ParamField path="body.y" type="number" default="0">
+  Vertical position in the stage world.
+</ParamField>
+
+<ParamField path="body.scale" type="number[]" default="[1.0, 1.0]">
+  `[x, y]` scale factors.
+</ParamField>
+
+<ParamField path="body.scroll" type="number[]" default="[1.0, 1.0]">
+  `[x, y]` parallax scroll factors. `0.9` makes the object scroll slower than the camera (background depth effect).
+</ParamField>
+
+<ParamField path="body.alpha" type="number" default="1.0">
+  Opacity from `0.0` (transparent) to `1.0` (opaque).
+</ParamField>
+
+<ParamField path="body.color" type="string" default="#FFFFFF">
+  Hex color tint applied to the sprite (e.g. `"#FF0000"` for red).
+</ParamField>
+
+<ParamField path="body.angle" type="number" default="0">
+  Rotation in degrees.
+</ParamField>
+
+<ParamField path="body.flipX" type="boolean" default="false">
+  Mirror the sprite horizontally.
+</ParamField>
+
+<ParamField path="body.flipY" type="boolean" default="false">
+  Mirror the sprite vertically.
+</ParamField>
+
+<ParamField path="body.antialiasing" type="boolean" default="true">
+  Enable bilinear filtering on this object. Set to `false` for pixel art.
+</ParamField>
+
+<ParamField path="body.animations" type="object[]">
+  Optional list of animation definitions for animated stage sprites. Uses the same structure as character animations (`anim`, `name`, `fps`, `loop`, `indices`, `offsets`).
+</ParamField>
+
+<ParamField path="body.firstAnimation" type="string">
+  Name of the animation to play when the stage loads (matches an `anim` field in `animations`).
+</ParamField>

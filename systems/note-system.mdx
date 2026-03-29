@@ -1,0 +1,289 @@
+---
+title: "Note system"
+description: "4-lane notes, hold notes, hit windows, NoteKind types, and the scoring and rating system — all matching Psych Engine exactly."
+---
+
+The note system covers the full lifecycle of a note: how it is stored after chart parsing, how it is judged when the player presses a key, and how the result updates score, health, and combo.
+
+## Lanes
+
+There are 4 lanes, numbered 0–3:
+
+| Lane | Direction | Key (default) |
+|------|-----------|--------------|
+| 0    | Left      | ←            |
+| 1    | Down      | ↓            |
+| 2    | Up        | ↑            |
+| 3    | Right     | →            |
+
+Both the player and the opponent use the same 4 lane indices. Ownership is tracked by `NoteData.must_press`:
+
+- `must_press = true` — player note, lanes 0–3 in the chart's `psych_v1` encoding
+- `must_press = false` — opponent note, lanes 4–7 in the chart's `psych_v1` encoding (normalized to 0–3 after parsing)
+
+## NoteData struct
+
+```rust crates/rustic-core/src/note.rs
+pub struct NoteData {
+    /// Strum time in milliseconds.
+    pub strum_time: f64,
+    /// Lane index (0-3: Left, Down, Up, Right).
+    pub lane: usize,
+    /// Sustain/hold length in milliseconds. 0 = tap note.
+    pub sustain_length: f64,
+    /// Whether this note must be hit by the player.
+    pub must_press: bool,
+    /// Note type.
+    pub kind: NoteKind,
+
+    // Runtime state (not from chart)
+    pub was_good_hit: bool,
+    pub too_late: bool,
+    pub hold_released: bool,
+    pub hold_progress: f64,
+    pub rating: Option<String>,
+    pub rating_mod: f64,
+    pub rating_disabled: bool,
+    pub gf_note: bool,
+    pub alt_note: bool,
+
+    // Visual overrides (set by Lua modcharts)
+    pub visible: bool,
+    pub alpha: f32,
+    pub scale_x: f32,        // default: 0.7
+    pub scale_y: f32,        // default: 0.7
+    pub angle: f32,
+    pub offset_x: f32,
+    pub offset_y: f32,
+    pub flip_y: bool,
+    pub correction_offset: f32,
+    pub is_reversing_scroll: bool,
+    pub color_r_offset: f32,
+    pub color_g_offset: f32,
+    pub color_b_offset: f32,
+}
+```
+
+### Hold notes
+
+A note is a hold (sustain) note when `sustain_length > 0.0`. Use `is_sustain()` to check:
+
+```rust
+pub fn is_sustain(&self) -> bool {
+    self.sustain_length > 0.0
+}
+```
+
+The hold tail extends from `strum_time` to `strum_time + sustain_length`. While held, the player earns health each tick. Releasing early sets `hold_released = true` and causes the remaining portion to count as a miss.
+
+### Active state
+
+```rust
+pub fn is_active(&self) -> bool {
+    !self.was_good_hit && !self.too_late
+}
+```
+
+Notes that have been hit or have passed their miss window are inactive and can be skipped by the input and rendering systems.
+
+## NoteKind
+
+```rust crates/rustic-core/src/note.rs
+pub enum NoteKind {
+    Normal,
+    Alt,       // "Alt Animation" — uses the -alt animation variant
+    Hey,       // "Hey!" — forces the "hey" animation
+    Hurt,      // "Hurt Note" — damages the player if hit
+    GfSing,    // "GF Sing" — girlfriend sings instead of current character
+    NoAnim,    // "No Animation" — note hit but no character animation plays
+    Custom(String), // any other type string (matches a script file)
+}
+```
+
+The kind is parsed from the optional 4th element of each `sectionNotes` tuple:
+
+```rust
+NoteKind::from_chart_value(sn.get(3))
+```
+
+To get the type string for Lua callbacks:
+
+```rust
+note.kind.as_type_str()
+// NoteKind::Normal  → ""
+// NoteKind::Alt     → "Alt Animation"
+// NoteKind::Hey     → "Hey!"
+// NoteKind::Hurt    → "Hurt Note"
+// NoteKind::GfSing  → "GF Sing"
+// NoteKind::NoAnim  → "No Animation"
+// NoteKind::Custom(s) → s
+```
+
+## Hit windows
+
+Hit windows match Psych Engine exactly. The window is tested against the **absolute** timing difference `|strum_time - input_time|`:
+
+```rust crates/rustic-core/src/rating.rs
+// From Rating::load_default()
+Sick:  hit_window = 45.0  ms,  score = 350,  rating_mod = 1.00
+Good:  hit_window = 90.0  ms,  score = 200,  rating_mod = 0.67
+Bad:   hit_window = 135.0 ms,  score = 100,  rating_mod = 0.34
+Shit:  hit_window = 166.0 ms,  score = 50,   rating_mod = 0.00
+```
+
+Any input beyond 166 ms from the note's strum time counts as a miss (no judgment returned).
+
+### Judging a note
+
+```rust
+pub fn judge_note(ratings: &[Rating], time_diff_abs: f64) -> Option<Judgment>
+```
+
+Pass the sorted `Rating` slice from `Rating::load_default()` and the absolute timing difference. Returns `None` for a miss, or a `Judgment` for a hit:
+
+```rust
+pub struct Judgment {
+    pub rating_index: usize,
+    pub name: String,          // "sick", "good", "bad", "shit"
+    pub score: i32,
+    pub rating_mod: f64,       // accuracy weight
+    pub note_splash: bool,     // show splash effect (only on Sick)
+    pub health_gain: f32,
+}
+```
+
+## Rating struct
+
+Each rating tier carries the full set of gameplay values:
+
+<ResponseField name="name" type="string" required>
+  Rating identifier: `"sick"`, `"good"`, `"bad"`, or `"shit"`.
+</ResponseField>
+
+<ResponseField name="image" type="string" required>
+  Atlas image name for the popup sprite.
+</ResponseField>
+
+<ResponseField name="hit_window" type="number" required>
+  Maximum absolute timing error in milliseconds for this tier.
+</ResponseField>
+
+<ResponseField name="rating_mod" type="number" required>
+  Accuracy weight in the range 0.0–1.0. Sick = 1.0, Good = 0.67, Bad = 0.34, Shit = 0.0.
+</ResponseField>
+
+<ResponseField name="score" type="number" required>
+  Points added to the score on a hit.
+</ResponseField>
+
+<ResponseField name="note_splash" type="boolean" required>
+  Whether to display a note splash effect. Only `true` for Sick.
+</ResponseField>
+
+<ResponseField name="health_gain" type="number" required>
+  Health added on a hit. Sick = 0.023, Good = 0.015, Bad = 0.005, Shit = 0.0.
+</ResponseField>
+
+## Scoring system
+
+`ScoreState` accumulates all gameplay results:
+
+```rust crates/rustic-core/src/scoring.rs
+pub struct ScoreState {
+    pub score: i32,
+    pub combo: i32,
+    pub max_combo: i32,
+    pub misses: i32,
+    /// Health in Psych Engine 0.0–2.0 range.
+    pub health: f32,
+    pub sicks: i32,
+    pub goods: i32,
+    pub bads: i32,
+    pub shits: i32,
+    pub total_notes_hit: f64,   // sum of rating_mod values
+    pub total_notes_played: i32,
+}
+```
+
+Health starts at `1.0` and is clamped to `[0.0, 2.0]`. The health bar shows `health / 2.0` as a percentage.
+
+### Recording a hit
+
+```rust
+state.note_hit(
+    judgment.score,
+    judgment.rating_mod,
+    judgment.health_gain,
+    &judgment.name,
+);
+```
+
+### Recording a miss
+
+```rust
+state.note_miss(HEALTH_MISS); // HEALTH_MISS = 0.0475
+```
+
+### Hold note ticks
+
+```rust
+// Gain health per tick while holding
+state.change_health(HEALTH_HOLD_TICK);  // +0.023 per tick
+
+// Lose health when the hold is dropped early
+state.change_health(-HEALTH_HOLD_DROP); // -0.08 when released
+```
+
+### Accuracy formula
+
+```rust
+pub fn accuracy(&self) -> f64 {
+    (self.total_notes_hit / self.total_notes_played as f64) * 100.0
+}
+```
+
+`total_notes_hit` accumulates each note's `rating_mod`. Since Shit has `rating_mod = 0.0`, hitting Shit notes contributes nothing to accuracy.
+
+### Grade thresholds
+
+| Accuracy | Grade |
+|----------|-------|
+| 100%     | S+    |
+| ≥ 95%    | S     |
+| ≥ 90%    | A     |
+| ≥ 80%    | B     |
+| ≥ 70%    | C     |
+| ≥ 60%    | D     |
+| < 60%    | F     |
+
+### FC classification
+
+```rust
+pub enum FcClassification {
+    Sfc,   // All Sick, 0 misses
+    Gfc,   // No Bads/Shits/misses, but has Goods
+    Fc,    // 0 misses, but has Bads or Shits
+    Sdcb,  // < 10 misses
+    Clear, // ≥ 10 misses
+}
+```
+
+```rust
+classify_fc(sicks, goods, bads, shits, misses) -> FcClassification
+```
+
+## EventNote
+
+Events embedded in the chart are parsed into `EventNote` values:
+
+```rust crates/rustic-core/src/note.rs
+pub struct EventNote {
+    pub strum_time: f64,
+    pub name: String,
+    pub value1: String,
+    pub value2: String,
+    pub fired: bool,
+}
+```
+
+Set `fired = true` once you have dispatched the event to prevent double-firing on subsequent frames.

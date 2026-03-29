@@ -1,0 +1,169 @@
+---
+title: "Development phases"
+description: "The five ordered phases for building Rustic Engine from a blank workspace to a fully mod-capable Psych Engine replacement."
+keywords: ["development", "roadmap", "phases", "milestones"]
+---
+
+Rustic Engine is built in five sequential phases. Each phase must be **playtest-verified** before work begins on the next one. Skipping ahead or blending phases is how V1 collapsed — don't do it.
+
+<Note>
+  All five phases are currently pending. The engine is under active construction.
+</Note>
+
+## Phase overview
+
+<Steps>
+  <Step title="Core + Rendering Foundation" titleSize="h3">
+    Establish the data layer and prove that sprites can be drawn to the screen.
+
+    **`rustic-core` work:**
+    - Chart parsing (Psych Engine JSON format — `song.notes[]`, `song.events[]`, BPM changes)
+    - Character and stage file loading (JSON definitions for atlas prefixes, offsets, sprite layers)
+    - Conductor / timing (song position in milliseconds → beats / steps / sections; mid-song BPM changes)
+    - Scoring math (hit windows: Sick 45 ms, Good 90 ms, Bad 135 ms, Shit 166 ms)
+    - Asset path resolution and mod loading stubs
+
+    **`rustic-render` work:**
+    - Window creation via `winit`
+    - Sparrow XML atlas parsing — each `<SubTexture>` name, position, frame offsets, optional rotation
+    - Sprite animation playback (animation names derived by stripping trailing digits)
+    - Basic sprite drawing via the `wgpu` backend
+    - Dual-camera system: game world camera + HUD overlay camera
+
+    **Done when:** unit tests pass for all `rustic-core` parsers, and Sparrow atlases render correctly on screen with animations playing.
+
+    <Tip>
+      Write the parsing unit tests first. Visual verification comes second — but it is required before moving on.
+    </Tip>
+  </Step>
+
+  <Step title="Gameplay + Audio + HUD" titleSize="h3">
+    Make the engine playable with a single hardcoded song.
+
+    **`rustic-gameplay` work:**
+    - Note spawning and downward scrolling
+    - Strum line positioning
+    - Input detection (key press → lane mapping)
+    - Hit / miss judgment against conductor song position
+    - Hold note logic: score tick while held, miss remaining ticks on release
+    - Health tracking and score accumulation
+
+    **`rustic-audio` work:**
+    - Instrumental + vocals playback via `kira`
+    - Conductor-driven timing lock (audio position drives game time — never wall-clock)
+    - Sound effects: miss sounds, countdown audio cues
+
+    **`rustic-render` HUD additions:**
+    - Health bar
+    - Score and combo display
+    - Countdown sequence visuals
+    - Rating popups (Sick / Good / Bad / Shit), combo number sprites, note splashes
+
+    **Done when:** you can play a hardcoded song from start to finish, audio stays synced to notes, and the full HUD is visible and reactive.
+  </Step>
+
+  <Step title="Characters & Stage" titleSize="h3">
+    Replace placeholder visuals with proper animated characters and a stage.
+
+    **Work items:**
+    - Animated character sprites: idle loop, four sing directions (left / down / up / right), miss animations
+    - Stage background rendering: layered foreground and background sprites with scroll factors and per-layer zoom
+    - Camera target system: camera follows the current singing character using lerped movement and section-driven target switches
+    - Beat-synchronized camera zoom pulses
+
+    **Done when:** a full song plays with the correct character animations and stage, and the camera follows singers as sections change.
+
+    <Note>
+      Camera zoom smoothing is intentionally improved over Psych Engine's jittery bump math here — but the Lua-facing API stays identical so mods are unaffected.
+    </Note>
+  </Step>
+
+  <Step title="Menus" titleSize="h3">
+    Build every navigation screen as its own isolated module inside `rustic-app`.
+
+    **Screens to implement:**
+
+    <CardGroup cols={2}>
+      <Card title="Title screen" icon="star">
+        Logo display, animated attract sequence, press-to-start input.
+      </Card>
+      <Card title="Main menu" icon="house">
+        Navigation hub linking to story mode, freeplay, and options.
+      </Card>
+      <Card title="Freeplay" icon="music">
+        Song list, difficulty select, and per-song high score display.
+      </Card>
+      <Card title="Story mode" icon="book">
+        Week list, character banners, total score tracking.
+      </Card>
+    </CardGroup>
+
+    Each screen is its own module in `rustic-app`. Screen transitions are managed by the state machine — title → main menu → freeplay / story → loading → playing → results.
+
+    **Done when:** you can navigate from the title screen to a song and back without any state leaking between screens.
+
+    <Warning>
+      This is where V1 died. Adding freeplay to a monolithic `main.rs` caused cascading breakage across the entire file. In V2, every menu is a self-contained module. If a screen's module grows beyond ~500 lines, split it immediately.
+    </Warning>
+  </Step>
+
+  <Step title="Mods + Lua + Modcharts" titleSize="h3">
+    Add the full Psych Engine modding surface and validate it against a real mod.
+
+    **Mod loading (`rustic-core`):**
+    - Mod directory discovery and loading
+    - Asset override priority: mod assets shadow base-game assets
+    - Custom note types (string `type` field dispatch)
+    - Custom event definitions
+
+    **Lua scripting (`rustic-scripting`):**
+    - Lua VM integration
+    - Callback system — all Psych Engine lifecycle hooks:
+
+    ```lua
+    -- Song lifecycle
+    onCreate()       onCreatePost()
+    onUpdate()       onUpdatePost()
+    onSongStart()    onEndSong()
+
+    -- Note events
+    onSpawnNote()    goodNoteHit()
+    opponentNoteHit() noteMiss()    noteMissPress()
+
+    -- Beat / step
+    onBeatHit()      onStepHit()    onSectionHit()
+
+    -- Custom events
+    onEvent()        eventEarlyTrigger()
+    ```
+
+    - Property bridge: `setProperty` / `getProperty` for arbitrary object mutation
+    - Sprite API: `makeLuaSprite`, `addLuaSprite`, transform and tint functions
+    - Tween API: matching Psych Engine function signatures exactly
+    - Camera API: zoom, position, and flash controls
+
+    **Modchart features:**
+    - Note manipulation from Lua (position, angle, alpha, skip)
+    - Shader support
+    - Video playback
+    - HScript (Haxe script) execution
+
+    **Done when:** VS Retrospecter Part 2 (`references/VS-RetroSpecter-PART-2-Compiled/`) runs correctly end-to-end — custom events fire, modchart note effects display, and Lua callbacks execute without errors.
+
+    <Tip>
+      Use the compiled mod in `references/VS-RetroSpecter-PART-2-Compiled/` as the integration test throughout this phase, not just at the end. Run it frequently to catch regressions early.
+    </Tip>
+  </Step>
+</Steps>
+
+## Phase status
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 1 | Core + Rendering Foundation | Pending |
+| 2 | Gameplay + Audio + HUD | Pending |
+| 3 | Characters & Stage | Pending |
+| 4 | Menus | Pending |
+| 5 | Mods + Lua + Modcharts | Pending |
+
+Phases are updated here as work progresses. A phase moves to **complete** only after playtest verification — not when the code compiles.

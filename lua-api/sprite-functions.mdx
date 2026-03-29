@@ -1,0 +1,475 @@
+---
+title: "Sprite functions"
+description: "Create, configure, animate, and remove Lua sprites from your mod scripts."
+---
+
+Lua sprites are custom display objects your script creates and manages independently of the engine's built-in characters and notes. You create a sprite with `makeLuaSprite`, configure it, then add it to the scene with `addLuaSprite`.
+
+```lua
+function onCreate()
+  makeLuaSprite("myBg", "backgrounds/city", 0, 0)
+  setObjectCamera("myBg", "camGame")
+  addLuaSprite("myBg", false)
+end
+```
+
+---
+
+## Creating sprites
+
+### `makeLuaSprite`
+
+Creates a new static image sprite and registers it by tag.
+
+<ParamField path="tag" type="string" required>
+  A unique string identifier for this sprite. Used to reference it in all other functions.
+</ParamField>
+
+<ParamField path="imagePath" type="string">
+  Image name relative to the `images/` directory, without extension. Pass an empty string or `nil` to create a 1×1 white graphic instead.
+</ParamField>
+
+<ParamField path="x" type="number" default="0">
+  Initial X position.
+</ParamField>
+
+<ParamField path="y" type="number" default="0">
+  Initial Y position.
+</ParamField>
+
+```lua
+makeLuaSprite("overlay", "ui/vignette", 0, 0)
+```
+
+The sprite is not visible until you call `addLuaSprite`.
+
+### `makeAnimatedLuaSprite`
+
+Creates an animated sprite backed by a Sparrow XML atlas.
+
+<ParamField path="tag" type="string" required>
+  Unique tag for this sprite.
+</ParamField>
+
+<ParamField path="imagePath" type="string" required>
+  Atlas image name relative to `images/`.
+</ParamField>
+
+<ParamField path="x" type="number" default="0">
+  Initial X position.
+</ParamField>
+
+<ParamField path="y" type="number" default="0">
+  Initial Y position.
+</ParamField>
+
+<ParamField path="spriteType" type="string">
+  Reserved for future use. Pass `nil` or omit.
+</ParamField>
+
+```lua
+makeAnimatedLuaSprite("explosion", "effects/boom", 400, 300)
+addAnimationByPrefix("explosion", "play", "boom", 24, false)
+addLuaSprite("explosion", true)
+playAnim("explosion", "play", true)
+```
+
+### `makeGraphic`
+
+Fills an existing sprite with a solid color rectangle. Call this after `makeLuaSprite` (with an empty image path) to set the size and color.
+
+<ParamField path="tag" type="string" required>
+  Tag of an existing sprite.
+</ParamField>
+
+<ParamField path="width" type="number" required>
+  Width of the rectangle in pixels.
+</ParamField>
+
+<ParamField path="height" type="number" required>
+  Height of the rectangle in pixels.
+</ParamField>
+
+<ParamField path="color" type="string" default="FFFFFF">
+  Hex color string (e.g. `"FF0000"` for red, `"000000"` for black).
+</ParamField>
+
+```lua
+makeLuaSprite("blackBars", "", 0, 0)
+makeGraphic("blackBars", 1280, 120, "000000")
+addLuaSprite("blackBars", true)
+```
+
+---
+
+## Adding and removing sprites
+
+### `addLuaSprite`
+
+Adds a previously created sprite to the scene so it renders.
+
+<ParamField path="tag" type="string" required>
+  Tag of the sprite to add.
+</ParamField>
+
+<ParamField path="isFront" type="boolean" default="false">
+  If `true`, draws the sprite in front of characters. If `false`, draws it behind characters.
+</ParamField>
+
+```lua
+addLuaSprite("myBg", false)    -- behind characters
+addLuaSprite("myOverlay", true) -- in front of characters
+```
+
+### `removeLuaSprite`
+
+Removes a sprite from the scene and hides it.
+
+<ParamField path="tag" type="string" required>
+  Tag of the sprite to remove.
+</ParamField>
+
+<ParamField path="destroy" type="boolean">
+  Reserved. The sprite data is retained in case you want to re-add it later.
+</ParamField>
+
+```lua
+removeLuaSprite("temporaryEffect")
+```
+
+### `luaSpriteExists`
+
+Returns `true` if a sprite with the given tag has been created.
+
+<ParamField path="tag" type="string" required>
+  Tag to check.
+</ParamField>
+
+```lua
+if luaSpriteExists("mySprite") then
+  setObjectAlpha("mySprite", 0.5)
+end
+```
+
+---
+
+## Positioning and display
+
+### `setObjectCamera`
+
+Assigns a sprite to a camera layer. Sprites on `camGame` scroll with the game world; sprites on `camHUD` are fixed to the screen.
+
+<ParamField path="tag" type="string" required>
+  Sprite tag.
+</ParamField>
+
+<ParamField path="camera" type="string" default="camGame">
+  Camera name: `"camGame"`, `"camHUD"`, or `"camOther"`. Case-insensitive; `"hud"` maps to `"camHUD"`.
+</ParamField>
+
+```lua
+setObjectCamera("scorePopup", "camHUD")
+```
+
+<Tip>
+  To set alpha or visibility on a sprite, use `setProperty`: `setProperty("mySprite.alpha", 0.5)` or `setProperty("mySprite.visible", false)`. There are no separate `setObjectAlpha` / `setObjectVisible` functions.
+</Tip>
+
+### `setObjectOrder`
+
+Sets the draw order (z-index) of a sprite relative to other Lua sprites.
+
+<ParamField path="tag" type="string" required>
+  Sprite tag.
+</ParamField>
+
+<ParamField path="order" type="number" required>
+  Draw order. Lower values render first (behind higher values).
+</ParamField>
+
+```lua
+setObjectOrder("foreground", 10)
+setObjectOrder("midground", 5)
+```
+
+### `screenCenter`
+
+Centers a sprite on the screen along the specified axis.
+
+<ParamField path="tag" type="string" required>
+  Sprite tag.
+</ParamField>
+
+<ParamField path="axis" type="string" default="xy">
+  Which axes to center: `"x"`, `"y"`, or `"xy"` (both).
+</ParamField>
+
+```lua
+makeLuaSprite("banner", "ui/banner", 0, 0)
+screenCenter("banner", "x")
+addLuaSprite("banner", true)
+```
+
+### `setScrollFactor`
+
+Controls how much a sprite moves with the camera (parallax effect).
+
+<ParamField path="tag" type="string" required>
+  Sprite tag.
+</ParamField>
+
+<ParamField path="x" type="number" required>
+  Horizontal scroll multiplier. `0` = fixed to camera, `1` = moves with world.
+</ParamField>
+
+<ParamField path="y" type="number" required>
+  Vertical scroll multiplier.
+</ParamField>
+
+```lua
+-- Distant background: barely scrolls
+setScrollFactor("skyBg", 0.1, 0.1)
+-- HUD element: doesn't scroll at all
+setScrollFactor("hudOverlay", 0, 0)
+```
+
+---
+
+## Scaling
+
+### `scaleObject`
+
+Sets the scale multiplier of a sprite directly.
+
+<ParamField path="tag" type="string" required>
+  Sprite tag.
+</ParamField>
+
+<ParamField path="x" type="number" required>
+  Horizontal scale. `1.0` = original size.
+</ParamField>
+
+<ParamField path="y" type="number" required>
+  Vertical scale. `1.0` = original size.
+</ParamField>
+
+```lua
+scaleObject("bigSprite", 2.0, 2.0)
+```
+
+### `setGraphicSize`
+
+Scales a sprite to an explicit pixel size. If one dimension is `0`, the other is derived from the aspect ratio automatically.
+
+<ParamField path="tag" type="string" required>
+  Sprite tag.
+</ParamField>
+
+<ParamField path="width" type="number">
+  Target width in pixels. Pass `0` to derive from height.
+</ParamField>
+
+<ParamField path="height" type="number">
+  Target height in pixels. Pass `0` to derive from width.
+</ParamField>
+
+```lua
+-- Scale to exactly 400px wide, preserve aspect ratio
+setGraphicSize("logo", 400, 0)
+
+-- Scale to 200×100 (may distort)
+setGraphicSize("bar", 200, 100)
+```
+
+### `updateHitbox`
+
+Recalculates the sprite's collision box after scaling. Call this after `scaleObject` or `setGraphicSize` if you need accurate width/height reads via `getProperty`.
+
+<ParamField path="tag" type="string" required>
+  Sprite tag.
+</ParamField>
+
+```lua
+setGraphicSize("mySprite", 300, 0)
+updateHitbox("mySprite")
+local w = getProperty("mySprite.width") -- now accurate
+```
+
+---
+
+## Animations
+
+### `addAnimationByPrefix`
+
+Registers a named animation using a Sparrow atlas prefix.
+
+<ParamField path="tag" type="string" required>
+  Tag of an animated sprite.
+</ParamField>
+
+<ParamField path="name" type="string" required>
+  Name to assign to this animation (used in `playAnim`).
+</ParamField>
+
+<ParamField path="prefix" type="string" required>
+  The SubTexture name prefix from the atlas XML (without frame numbers).
+</ParamField>
+
+<ParamField path="fps" type="number" default="24">
+  Frames per second.
+</ParamField>
+
+<ParamField path="loop" type="boolean" default="true">
+  Whether the animation loops.
+</ParamField>
+
+```lua
+makeAnimatedLuaSprite("fire", "effects/fire", 600, 400)
+addAnimationByPrefix("fire", "burn", "fire loop", 24, true)
+addAnimationByPrefix("fire", "ignite", "fire start", 18, false)
+addLuaSprite("fire", false)
+playAnim("fire", "ignite", true)
+```
+
+### `addAnimationByIndices`
+
+Registers an animation using specific frame indices from the atlas instead of the full prefix sequence.
+
+<ParamField path="tag" type="string" required>
+  Sprite tag.
+</ParamField>
+
+<ParamField path="name" type="string" required>
+  Animation name.
+</ParamField>
+
+<ParamField path="prefix" type="string" required>
+  Atlas prefix.
+</ParamField>
+
+<ParamField path="indices" type="table" required>
+  Lua table of 1-based frame indices to include (e.g. `{0, 1, 2, 5}`).
+</ParamField>
+
+<ParamField path="fps" type="number" default="24">
+  Frames per second.
+</ParamField>
+
+<ParamField path="loop" type="boolean" default="true">
+  Whether the animation loops.
+</ParamField>
+
+```lua
+-- Use only the first 3 frames of the "blink" atlas sequence
+addAnimationByIndices("character", "blink", "char blink", {0, 1, 2}, 12, false)
+```
+
+### `addOffset`
+
+Sets an offset that is applied when a specific animation plays. Useful for aligning sprites whose atlas frames have different anchor points.
+
+<ParamField path="tag" type="string" required>
+  Sprite tag.
+</ParamField>
+
+<ParamField path="name" type="string" required>
+  Animation name to attach this offset to.
+</ParamField>
+
+<ParamField path="x" type="number" default="0">
+  Horizontal offset in pixels.
+</ParamField>
+
+<ParamField path="y" type="number" default="0">
+  Vertical offset in pixels.
+</ParamField>
+
+```lua
+addOffset("myChar", "idle", -10, 5)
+addOffset("myChar", "singLEFT", 30, -20)
+```
+
+### `playAnim`
+
+Plays a named animation on a sprite.
+
+<ParamField path="tag" type="string" required>
+  Sprite tag.
+</ParamField>
+
+<ParamField path="name" type="string" required>
+  Animation name (must be registered with `addAnimationByPrefix` or similar).
+</ParamField>
+
+<ParamField path="forced" type="boolean" default="false">
+  If `true`, restarts the animation even if it is already playing.
+</ParamField>
+
+<ParamField path="reversed" type="boolean" default="false">
+  Reserved for future use.
+</ParamField>
+
+<ParamField path="frame" type="number">
+  Reserved for future use.
+</ParamField>
+
+```lua
+playAnim("explosion", "burst", true)
+```
+
+### `objectPlayAnimation`
+
+Alias for `playAnim`. Accepts `(tag, name, forced)` — no `reversed` or `frame` parameters.
+
+```lua
+objectPlayAnimation("explosion", "burst", true)
+```
+
+### `characterPlayAnim`
+
+Queues an animation to play on a built-in character (boyfriend, dad, or gf) rather than a Lua sprite.
+
+<ParamField path="charType" type="string" required>
+  Character to target: `"boyfriend"`, `"dad"`, or `"gf"`.
+</ParamField>
+
+<ParamField path="anim" type="string" required>
+  Animation name to play.
+</ParamField>
+
+<ParamField path="forced" type="boolean" default="false">
+  If `true`, restarts the animation even if already playing.
+</ParamField>
+
+```lua
+characterPlayAnim("boyfriend", "hey", false)
+```
+
+---
+
+## Other sprite utilities
+
+### `addAnimation`
+
+Alias for `addAnimationByPrefix`. Accepts the same parameters: `(tag, name, prefix, fps, loop)`.
+
+```lua
+addAnimation("fire", "burn", "fire loop", 24, true)
+```
+
+### `addProperty`
+
+Declares a custom property on a sprite (stored as a custom variable). Only sets the value if the property has not already been defined — useful for optional mod parameters.
+
+<ParamField path="name" type="string" required>
+  Property name.
+</ParamField>
+
+<ParamField path="defaultValue" type="any" required>
+  Value to set if the property doesn't already exist.
+</ParamField>
+
+```lua
+addProperty("myFlag", false)
+addProperty("damageMultiplier", 1.0)
+```

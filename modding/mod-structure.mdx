@@ -1,0 +1,228 @@
+---
+title: 'Mod structure'
+description: 'How to lay out your mod directory and where to place charts, characters, stages, scripts, sounds, and images.'
+---
+
+A Rustic Engine mod is a directory of assets and scripts that follows the same layout as the Psych Engine `assets/` directory. The engine merges your mod into the base game by prepending your directory to the asset search path — your files take precedence, base game files are the fallback.
+
+## Directory layout
+
+```
+my-mod/
+├── data/
+│   └── my-song/
+│       ├── my-song.json          # Chart (normal difficulty)
+│       ├── my-song-hard.json     # Chart (hard difficulty)
+│       ├── my-song-easy.json     # Chart (easy difficulty)
+│       ├── script.lua            # Song Lua script
+│       └── events.json           # Optional separate events file
+├── characters/
+│   └── my-character.json         # Character definition
+├── stages/
+│   ├── my-stage.json             # Stage definition
+│   └── my-stage.lua              # Stage Lua script (optional)
+├── images/
+│   ├── characters/
+│   │   ├── MY_CHARACTER.png      # Spritesheet
+│   │   └── MY_CHARACTER.xml      # Sparrow atlas
+│   ├── icons/
+│   │   └── icon-my-character.png # Health icon (48×48 or 150×150)
+│   └── my-stage-bg.png           # Stage background image
+├── sounds/
+│   └── my-sound.ogg
+├── music/
+│   └── my-music.ogg
+├── songs/
+│   └── my-song/
+│       ├── Inst.ogg              # Instrumental
+│       └── Voices.ogg            # Vocals (if needsVoices is true)
+├── weeks/
+│   └── my-week.json              # Week/story mode definition
+└── custom_events/
+    └── my-event.lua              # Custom event handler script
+```
+
+## Asset override priority
+
+When the engine resolves any asset, it walks the search roots **in order** and returns the first match:
+
+```
+1. mod assets
+2. mod shared/
+3. engine shared assets
+4. base game shared assets
+5. base game assets
+```
+
+If you place a file at the same relative path as a base game file, your version is loaded instead. Files you do not include fall through to the base game automatically.
+
+<Note>
+  JSON files are not merged. Overriding `characters/bf.json` replaces the entire file — you must include all fields, not just the ones you want to change.
+</Note>
+
+## Charts
+
+Charts live in `data/{song-name}/`. The chart filename determines the difficulty:
+
+| Filename | Difficulty |
+|---|---|
+| `{song-name}.json` | Normal (default) |
+| `{song-name}-easy.json` | Easy |
+| `{song-name}-hard.json` | Hard |
+
+The engine looks for the chart at `data/{song_name}/{filename}` across all search roots. Your mod's version is found first if you place it in the right path.
+
+An optional `events.json` file in the same directory can hold events separately from the chart:
+
+```json
+{
+  "song": {
+    "events": [
+      [1000.0, [["Play Animation", "hey", "BF"]]]
+    ]
+  }
+}
+```
+
+## Characters
+
+Character JSON files go in `characters/`. The engine resolves them via:
+
+```
+characters/{name}.json
+```
+
+The `image` field in the character JSON points to the spritesheet path relative to `images/` (without extension). The engine then looks for both the `.png` and `.xml` files in the `images/` directory across all search roots.
+
+See [Asset formats — Characters](/modding/asset-formats#characters) for the full field reference.
+
+## Stages
+
+Stage JSON files go in `stages/`. The engine resolves them via:
+
+```
+stages/{name}.json
+```
+
+If a Lua script with the same base name exists at `stages/{name}.lua`, it is loaded as the stage script when the song starts.
+
+Stage images are resolved using the stage's `directory` field. The engine checks `{directory}/images/{image}.png` before falling back to `images/{image}.png`.
+
+See [Asset formats — Stages](/modding/asset-formats#stages) for the full field reference.
+
+## Lua scripts
+
+### Song scripts
+
+Any `.lua` file inside `data/{song-name}/` is loaded as a song script. You can have multiple scripts per song — they are all loaded and every callback is called on all of them.
+
+The engine discovers song scripts at runtime:
+
+```rust
+// From paths.rs: song_scripts()
+// Scans data/{song_name}/ across all search roots for *.lua files
+```
+
+Common script filenames (all are equivalent — naming is up to you):
+
+- `script.lua` — General song script
+- `modchart.lua` — Note manipulation and camera effects
+- `eventScript.lua` — Custom event handling
+
+### Stage scripts
+
+A stage Lua script is loaded from `stages/{name}.lua` when the corresponding stage is active. Stage scripts receive the same callbacks as song scripts.
+
+### Custom event scripts
+
+Scripts in `custom_events/` are loaded globally and are always active. They receive `onEvent` calls for every event in every song:
+
+```
+custom_events/
+└── my-event.lua
+```
+
+```lua
+-- custom_events/my-event.lua
+function onEvent(name, value1, value2)
+  if name == "My Custom Event" then
+    -- handle it
+  end
+end
+```
+
+### Script loading order
+
+<Steps>
+  <Step title="Stage script loads">
+    `stages/{stage-name}.lua` is loaded first, if it exists.
+  </Step>
+  <Step title="Song scripts load">
+    All `*.lua` files in `data/{song-name}/` are loaded, sorted alphabetically.
+  </Step>
+  <Step title="Custom event scripts load">
+    All `*.lua` files in `custom_events/` across all search roots are loaded, sorted alphabetically.
+  </Step>
+  <Step title="onCreate fires">
+    After all scripts are loaded, the `onCreate` callback is dispatched to every loaded script.
+  </Step>
+</Steps>
+
+<Tip>
+  If you have both a mod and a base game script in `data/{song-name}/`, both are loaded — the engine collects scripts from **all** search roots for a given song, not just the first one. Use this to layer mod behavior on top of existing song scripts.
+</Tip>
+
+## Sounds and music
+
+| Asset type | Path |
+|---|---|
+| Song instrumental | `songs/{song-name}/Inst.ogg` |
+| Song vocals | `songs/{song-name}/Voices.ogg` |
+| Custom vocals file | `songs/{song-name}/{vocals_file}.ogg` (set in character JSON) |
+| Sound effects | `sounds/{name}.ogg` |
+| Background music | `music/{name}.ogg` |
+
+## Images
+
+Images are loaded from `images/` in each search root. The engine looks for:
+
+| Asset type | Path |
+|---|---|
+| Sprite atlas PNG | `images/{path}.png` |
+| Sprite atlas XML | `images/{path}.xml` |
+| Health icon | `images/icons/icon-{name}.png` or `images/icons/{name}.png` |
+| Stage image | `images/{image}.png` (or `{directory}/images/{image}.png`) |
+
+## Song discovery
+
+The engine discovers available songs by scanning `data/` directories across all search roots. A folder is treated as a song if it contains a chart file matching the folder name:
+
+```
+data/
+└── my-song/
+    └── my-song.json    ← required for discovery
+```
+
+Songs present in multiple search roots are deduplicated — the highest-priority root's version wins.
+
+## Weeks
+
+Week definitions live in `weeks/{name}.json`. They control which songs appear in Story Mode and Freeplay. The engine loads weeks from the first `weeks/` directory it finds, then merges from additional roots.
+
+```json
+{
+  "songs": [
+    ["my-song", "my-character", [146, 113, 253]]
+  ],
+  "weekCharacters": ["my-character", "", "gf"],
+  "weekBackground": "my-week-bg",
+  "storyName": "my story",
+  "weekName": "MY WEEK",
+  "weekBefore": "",
+  "startUnlocked": true,
+  "hideStoryMode": false,
+  "hideFreeplay": false
+}
+```
+
+Each entry in `songs` is `[song_name, character, [r, g, b]]` where `character` is the character shown in the story mode menu for that song, and the color array is the album art background color.

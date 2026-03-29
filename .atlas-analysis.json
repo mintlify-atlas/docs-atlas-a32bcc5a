@@ -1,0 +1,107 @@
+{
+  "projectType": "framework",
+  "projectName": "Rustic Engine",
+  "projectDescription": "A from-scratch Rust reimplementation of Psych Engine — the dominant Friday Night Funkin' modding engine — with a modular workspace architecture and full Lua scripting API compatibility.",
+  "theme": "aspen",
+  "primaryColor": "#B7410E",
+  "lightColor": null,
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "building"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "architecture/overview",
+              "architecture/crates",
+              "architecture/state-machine"
+            ]
+          },
+          {
+            "group": "Core Systems",
+            "pages": [
+              "systems/chart-format",
+              "systems/conductor",
+              "systems/note-system",
+              "systems/camera",
+              "systems/audio",
+              "systems/rendering"
+            ]
+          },
+          {
+            "group": "Modding Guide",
+            "pages": [
+              "modding/overview",
+              "modding/asset-formats",
+              "modding/custom-events",
+              "modding/mod-structure"
+            ]
+          },
+          {
+            "group": "Development",
+            "pages": [
+              "development/phases",
+              "development/contributing"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Lua API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "lua-api/overview",
+              "lua-api/callbacks"
+            ]
+          },
+          {
+            "group": "Functions",
+            "pages": [
+              "lua-api/sprite-functions",
+              "lua-api/tween-functions",
+              "lua-api/camera-functions",
+              "lua-api/property-functions"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "1:1 Psych Engine feature parity with identical Lua API syntax and behavior",
+    "Modular Cargo workspace with six isolated crates (core, audio, render, gameplay, scripting, app)",
+    "Psych Engine JSON chart format parsing with legacy format auto-conversion",
+    "Conductor-driven timing with mid-song BPM change support",
+    "4-lane note system with Sick/Good/Bad/Shit hit windows matching Psych Engine exactly",
+    "Dual-camera system (game world + HUD overlay) with smooth lerped movement",
+    "Sparrow XML sprite atlas loading and animation",
+    "Full Lua VM scripting with ~200+ Psych Engine function callbacks",
+    "Mod directory loading with asset override priority (mod → base)",
+    "Tween system with easing functions for Lua-driven animations"
+  ],
+  "publicApiSurface": [
+    "parse_chart(json_data: &str) -> Result<ParsedChart, ChartError>",
+    "parse_events_file(json_data: &str) -> Result<Vec<EventNote>, ChartError>",
+    "ScriptManager::new() / load_script() / call() / call_note_hit() / call_event()",
+    "ScriptManager::call_beat(callback, beat) / call_step(callback, step)",
+    "ScriptManager::update_tweens(dt: f32)",
+    "ScriptManager::populate_note_data(notes)",
+    "LuaScript::load(path, state) -> Result<LuaScript, ...>",
+    "Conductor (BPM/beat/step tracking from song position in ms)",
+    "SwagSong / SwagSection / NoteData / EventNote structs",
+    "Lua callbacks: onCreate, onUpdate, onBeatHit, onStepHit, goodNoteHit, noteMiss, onEvent",
+    "Lua functions: makeLuaSprite, addLuaSprite, setProperty, getProperty, doTweenX/Y/Alpha/Angle/Zoom"
+  ]
+}

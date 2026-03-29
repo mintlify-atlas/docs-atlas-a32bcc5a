@@ -1,0 +1,173 @@
+---
+title: "Camera system"
+description: "Two independent cameras — camGame for the game world and camHUD for the UI overlay — with lerped movement, section-driven targeting, and beat-synchronized zoom pulses."
+---
+
+Rustic Engine runs two cameras simultaneously. `GameCamera` handles the game world (characters, stage, notes) and `HudCamera` handles the HUD overlay (score, health bar, combo). Each has its own zoom level and update loop.
+
+## GameCamera
+
+```rust crates/rustic-render/src/camera.rs
+pub struct GameCamera {
+    pub x: f32,
+    pub y: f32,
+    pub zoom: f32,
+    pub target_x: f32,
+    pub target_y: f32,
+    pub target_zoom: f32,
+    /// Stage-defined camera speed multiplier (default 1.0).
+    pub camera_speed: f32,
+    /// Camera shake state: (intensity, remaining_duration).
+    pub shake: Option<(f32, f32)>,
+    /// Camera flash state: (r, g, b, alpha, remaining_duration, total_duration).
+    pub flash: Option<(f32, f32, f32, f32, f32, f32)>,
+    /// Current shake offset applied to position.
+    pub shake_offset: (f32, f32),
+}
+```
+
+### Lerped follow
+
+`GameCamera::update()` uses exponential smoothing — the same formula as Psych Engine's `backend.BaseStage`:
+
+```rust crates/rustic-render/src/camera.rs
+pub fn update(&mut self, dt_secs: f32) {
+    let lerp = 1.0 - (-dt_secs * 2.4 * self.camera_speed).exp();
+    self.x += (self.target_x - self.x) * lerp;
+    self.y += (self.target_y - self.y) * lerp;
+    self.zoom += (self.target_zoom - self.zoom) * lerp;
+    self.update_effects(dt_secs);
+}
+```
+
+The lerp factor `1 - exp(-dt × 2.4 × speed)` is frame-rate independent and approaches the target asymptotically — exactly matching Psych Engine's camera feel.
+
+<Note>
+  `camera_speed` defaults to `1.0`. Stages can override it to make the camera track faster or slower. The Lua API exposes this as `cameraSpeed`.
+</Note>
+
+### Setting a follow target
+
+```rust
+// Smoothly follow a position
+camera.follow(target_x, target_y);
+
+// Snap immediately (no interpolation)
+camera.snap_to(x, y);
+```
+
+`follow()` only updates `target_x` / `target_y`. The camera position catches up over subsequent `update()` calls. `snap_to()` sets both the current and target positions so there is no lag.
+
+### World-to-screen projection
+
+```rust
+pub fn world_to_screen(
+    &self,
+    world_x: f32,
+    world_y: f32,
+    screen_w: f32,
+    screen_h: f32,
+) -> (f32, f32)
+```
+
+Converts a world-space coordinate to a screen-space pixel position, accounting for camera position, zoom, and active shake offset:
+
+```rust
+let sx = (world_x - self.x) * self.zoom + screen_w / 2.0 + self.shake_offset.0;
+let sy = (world_y - self.y) * self.zoom + screen_h / 2.0 + self.shake_offset.1;
+```
+
+## HudCamera
+
+```rust crates/rustic-render/src/camera.rs
+pub struct HudCamera {
+    pub zoom: f32,
+    pub target_zoom: f32,
+    pub follow_lerp: f32,   // default: 0.04
+}
+```
+
+The HUD camera has no position — it is always centered. It only controls zoom for the HUD layer. Its update uses a frame-rate-normalized lerp:
+
+```rust
+pub fn update(&mut self, dt_secs: f32) {
+    let lerp = 1.0 - (1.0 - self.follow_lerp).powf(dt_secs * 60.0);
+    self.zoom += (self.target_zoom - self.zoom) * lerp;
+}
+```
+
+## Zoom pulses
+
+Both cameras support zoom bumps synchronized to the conductor beat. Call `bump_zoom()` at beat boundaries:
+
+```rust
+// In on_beat_hit callback:
+game_camera.bump_zoom(0.03);   // add to current zoom
+hud_camera.bump_zoom(0.05);
+```
+
+`bump_zoom()` adds directly to the *current* zoom value, above the `target_zoom`. Because both cameras lerp back toward `target_zoom` every frame, the bump decays smoothly without any explicit timer:
+
+```rust crates/rustic-render/src/camera.rs
+pub fn bump_zoom(&mut self, amount: f32) {
+    self.zoom += amount;
+}
+```
+
+### V2 improvement over Psych Engine
+
+Psych Engine's bump implementation sets a separate zoom target and resets it every beat, causing visible jitter at high BPMs where the reset fires before the lerp fully settles. Rustic Engine adds to `self.zoom` and lets the existing exponential lerp decay the bump naturally. This produces a smoother pulse without changing the surface API — Lua scripts that call `doTweenZoom` or manipulate `cameraGame.zoom` see identical behavior.
+
+## Section-driven camera targets
+
+At each section change, update the camera's follow target based on which character is singing:
+
+```rust
+// mustHitSection = true: player section, camera focuses on player
+// mustHitSection = false: opponent section, camera focuses on opponent
+if section.must_hit_section {
+    game_camera.follow(player_camera_x, player_camera_y);
+} else {
+    game_camera.follow(opponent_camera_x, opponent_camera_y);
+}
+```
+
+Character camera offsets are defined in each character's JSON file and added to the character's world position.
+
+## Camera shake
+
+```rust
+camera.start_shake(intensity, duration_secs);
+```
+
+While shake is active, a pseudo-random offset is added to the camera position each frame. Intensity is in screen-space units (Psych Engine uses screen-space intensity scaled by 100).
+
+## Camera flash
+
+```rust
+camera.start_flash("#FFFFFF", duration_secs, alpha);
+```
+
+The flash fades from `alpha` to 0 over `duration_secs`. Query the current overlay color and alpha with:
+
+```rust
+if let Some(([r, g, b], a)) = camera.flash_overlay() {
+    // draw a full-screen quad with this color and alpha
+}
+```
+
+## Lua API surface
+
+The camera Lua API matches Psych Engine's function signatures exactly:
+
+| Lua function | Behavior |
+|---|---|
+| `doTweenZoom(tag, cam, zoom, duration, ease)` | Tween `target_zoom` on `camGame` or `camHUD` |
+| `setProperty("camGame.zoom", value)` | Directly set `game_camera.zoom` |
+| `setProperty("cameraSpeed", value)` | Set `game_camera.camera_speed` |
+| `shakeCamera(cam, intensity, duration)` | Call `start_shake()` on the named camera |
+| `flashCamera(cam, duration, color, alpha)` | Call `start_flash()` on the named camera |
+
+<Tip>
+  When a Lua script reads `camGame.zoom` mid-tween, it gets the interpolated `self.zoom` value, not `target_zoom`. This matches Psych Engine's observable behavior.
+</Tip>

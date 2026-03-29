@@ -1,0 +1,145 @@
+---
+title: "Building from source"
+description: "Detailed instructions for building Rustic Engine in debug and release modes, with notes on the workspace structure and key dependencies."
+---
+
+## Requirements
+
+- **Rust stable toolchain** via [rustup](https://rustup.rs)
+- **git**
+
+Cargo manages all library dependencies. You do not need to install graphics drivers, audio libraries, or any other system packages manually — `wgpu` handles GPU adapter selection at runtime, and `kira` bundles its audio backend.
+
+## Build commands
+
+### Debug build
+
+A debug build includes full debug symbols and no optimizations. This is the default for development.
+
+```bash
+cargo build
+```
+
+The compiled binary is placed at `target/debug/rustic-app`.
+
+### Release build
+
+A release build enables compiler optimizations. Use this for performance testing or distribution.
+
+```bash
+cargo build --release
+```
+
+The compiled binary is placed at `target/release/rustic-app`.
+
+### Run directly
+
+```bash
+cargo run
+```
+
+You can pass `--release` to run the optimized build:
+
+```bash
+cargo run --release
+```
+
+### Tests
+
+Run all tests across every crate in the workspace:
+
+```bash
+cargo test
+```
+
+Run tests for a single crate:
+
+```bash
+cargo test -p rustic-core
+```
+
+`rustic-core` is the most unit-testable crate because it has no rendering or audio dependencies — it contains only data types and parsing logic.
+
+### Linting
+
+```bash
+cargo clippy
+```
+
+Clippy is the project's linter. Warnings are expected to be resolved before committing.
+
+## Workspace structure
+
+The `Cargo.toml` at the repository root defines the workspace. All crates are under the `crates/` directory.
+
+```toml
+[workspace]
+resolver = "2"
+members = [
+    "crates/rustic-core",
+    "crates/rustic-audio",
+    "crates/rustic-render",
+    "crates/rustic-gameplay",
+    "crates/rustic-scripting",
+    "crates/rustic-app",
+    "crates/rustanimate",
+]
+```
+
+Each member crate has its own `Cargo.toml`. Shared dependency versions are declared once in `[workspace.dependencies]` and referenced from individual crates using `{ workspace = true }`.
+
+### Crate summary
+
+| Crate | Type | Description |
+|---|---|---|
+| `rustic-core` | Library | Data types, parsing, scoring math — no rendering or audio |
+| `rustic-audio` | Library | Audio playback and conductor via `kira` |
+| `rustic-render` | Library | All GPU rendering via `wgpu` |
+| `rustic-gameplay` | Library | Game logic, input, hit detection, PlayState |
+| `rustic-scripting` | Library | Lua VM and Psych Engine API surface |
+| `rustic-app` | Binary | Entry point, window creation, state machine |
+| `rustanimate` | Library | Adobe Animate atlas parser and playback (renderer-agnostic) |
+
+## Key dependencies
+
+These are the primary workspace-level dependencies declared in the root `Cargo.toml`:
+
+| Crate | Version | Purpose |
+|---|---|---|
+| `wgpu` | 28 | GPU rendering backend (Metal, Vulkan, DX12, WebGPU) |
+| `naga` | 28 | Shader translation (GLSL input → WGSL output) |
+| `winit` | 0.30 | Cross-platform window creation and event loop |
+| `glyphon` | 0.10 | GPU text rendering |
+| `kira` | 0.9 | Audio engine with OGG support |
+| `image` | 0.25 | PNG texture loading |
+| `bytemuck` | 1 | Safe casting of data to GPU buffer bytes |
+| `pollster` | 0.4 | Minimal async executor (used to block on `wgpu` init) |
+| `serde` / `serde_json` | 1 | JSON deserialization for charts, characters, and stages |
+| `quick-xml` | 0.37 | Sparrow XML atlas parsing |
+| `glam` | 0.29 | 2D/3D math (vectors, matrices, transforms) |
+| `thiserror` | 2 | Ergonomic error type derivation |
+| `log` / `env_logger` | 0.4 / 0.11 | Logging; set `RUST_LOG=debug` at runtime for verbose output |
+
+## Notes
+
+### The `.intentionally-empty-file.o` file
+
+The repository root contains a file named `.intentionally-empty-file.o`. This file is a placeholder and is not compiled into the engine. Its presence is intentional — do not delete it.
+
+### First build time
+
+The first `cargo build` will compile all dependencies from source. Expect this to take several minutes depending on your hardware. Subsequent builds are incremental and much faster.
+
+### Logging
+
+Rustic Engine uses `env_logger` for runtime logging. To enable debug output, set the `RUST_LOG` environment variable before running:
+
+```bash
+RUST_LOG=debug cargo run
+```
+
+For output scoped to a single crate:
+
+```bash
+RUST_LOG=rustic_core=debug cargo run
+```

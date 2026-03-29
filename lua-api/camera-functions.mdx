@@ -1,0 +1,192 @@
+---
+title: "Camera functions"
+description: "Control camera position, visual effects, and zoom from Lua scripts."
+---
+
+Rustic Engine has two cameras:
+
+- **`camGame`** — The game world camera. Follows the current singer and can be zoomed or shaken.
+- **`camHUD`** — The HUD overlay camera. Fixed to the screen. The health bar, score, and combo display are drawn here.
+
+<Note>
+  Rustic Engine's camera zoom interpolation is smoother than Psych Engine's original bump implementation. The Lua API is identical — your scripts work without changes.
+</Note>
+
+## Zoom control
+
+Camera zoom is controlled through the tween system and the property system. There are no standalone `setCamZoom` functions — use `doTweenZoom` for animated zoom or `setProperty` for an immediate change:
+
+```lua
+-- Animated zoom (recommended)
+doTweenZoom("bossZoom", "camGame", 1.3, 0.8, "cubeOut")
+
+-- Immediate zoom via property write
+setProperty("defaultCamZoom", 1.1)
+```
+
+The `defaultCamZoom` property controls the resting zoom level that the engine returns to between beat bumps. Set it during `onCreate` or from a chart event:
+
+```lua
+function onEvent(name, value1, value2)
+  if name == "Change Zoom" then
+    setProperty("defaultCamZoom", tonumber(value1) or 0.9)
+  end
+end
+```
+
+See [Tween functions](/lua-api/tween-functions) for the full `doTweenZoom` signature.
+
+---
+
+## Camera effects
+
+### `cameraShake`
+
+Applies a screen shake effect to a camera.
+
+<ParamField path="camera" type="string" required>
+  Camera to shake: `"camGame"` or `"camHUD"`. Aliases `"game"` and `"hud"` are accepted.
+</ParamField>
+
+<ParamField path="intensity" type="number" required>
+  Shake magnitude. Typical values are `0.005` (subtle) to `0.05` (strong).
+</ParamField>
+
+<ParamField path="duration" type="number" required>
+  How long the shake lasts, in seconds.
+</ParamField>
+
+```lua
+-- Subtle shake on miss
+function noteMiss(membersIndex, noteData, noteType, isSustainNote)
+  cameraShake("camGame", 0.01, 0.2)
+end
+
+-- Heavy shake for an impact event
+function onEvent(name, value1, value2)
+  if name == "Impact" then
+    cameraShake("camGame", 0.04, 0.5)
+    cameraShake("camHUD", 0.02, 0.3)
+  end
+end
+```
+
+### `cameraFlash`
+
+Flashes a solid color over a camera briefly.
+
+<ParamField path="camera" type="string" required>
+  Camera to flash: `"camGame"` or `"camHUD"`. Aliases `"game"` and `"hud"` are accepted.
+</ParamField>
+
+<ParamField path="color" type="string">
+  Hex color string (e.g. `"FFFFFF"` for white, `"FF0000"` for red). Defaults to `"FFFFFF"`.
+</ParamField>
+
+<ParamField path="duration" type="number" default="0.5">
+  Duration of the flash in seconds.
+</ParamField>
+
+<ParamField path="forced" type="boolean">
+  Reserved for Psych Engine compatibility. Has no effect currently.
+</ParamField>
+
+```lua
+cameraFlash("camGame", "FFFFFF", 0.3)
+```
+
+### `customFlash`
+
+Like `cameraFlash` but accepts an options table with an `alpha` key for controlling flash opacity.
+
+<ParamField path="camera" type="string" required>
+  Camera to flash.
+</ParamField>
+
+<ParamField path="color" type="string">
+  Hex color string. Defaults to `"FFFFFF"`.
+</ParamField>
+
+<ParamField path="duration" type="number" default="0.5">
+  Duration in seconds.
+</ParamField>
+
+<ParamField path="options" type="table">
+  Optional table. Supports `alpha` key (default `0.75`).
+</ParamField>
+
+```lua
+customFlash("camGame", "FF0000", 0.5, {alpha = 0.5})
+```
+
+---
+
+## Camera position
+
+### `cameraSetTarget`
+
+Requests the camera to follow a named character target.
+
+<ParamField path="target" type="string" required>
+  Character to follow: `"dad"`, `"boyfriend"`, or `"gf"`.
+</ParamField>
+
+```lua
+function onEvent(name, value1, value2)
+  if name == "Focus Camera" then
+    cameraSetTarget(value1) -- e.g. "dad" or "boyfriend"
+  end
+end
+```
+
+### `moveCameraSection`
+
+Moves the camera to the position dictated by a chart section's `mustHitSection` flag, as if that section had just started.
+
+<ParamField path="section" type="number" default="0">
+  Section index in the chart (0-based).
+</ParamField>
+
+```lua
+moveCameraSection(0) -- reset to section 0's camera position
+```
+
+---
+
+## Integrating tweens with camera
+
+Camera zoom works naturally with the tween system:
+
+```lua
+function onSongStart()
+  -- Zoom in on song start, then return to default
+  doTweenZoom("introZoom", "camGame", 1.4, 1.5, "cubeOut")
+  runTimer("introEnd", 1.5, 1)
+end
+
+function onTimerCompleted(tag, loops_done, loops_left)
+  if tag == "introEnd" then
+    doTweenZoom("introZoomBack", "camGame", defaultCamZoom, 0.8, "quadInOut")
+  end
+end
+
+function onBeatHit()
+  -- Pulse zoom on every other beat
+  if curBeat % 2 == 0 and cameraZoomOnBeat then
+    doTweenZoom("beatBump", "camGame", defaultCamZoom + 0.03, 0.1, "quadOut")
+    runTimer("bumpRestore", 0.1, 1)
+  end
+end
+```
+
+---
+
+## Relevant globals
+
+These globals are synced into your script before each callback and are safe to read:
+
+| Global | Type | Description |
+|---|---|---|
+| `defaultCamZoom` | number | Current default camera zoom (writable via `setProperty`) |
+| `cameraSpeed` | number | Camera follow speed multiplier |
+| `cameraZoomOnBeat` | boolean | Whether the engine auto-bumps zoom on beats |

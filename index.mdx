@@ -1,97 +1,79 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "Rustic Engine"
+description: "A from-scratch Rust reimplementation of Psych Engine — the dominant Friday Night Funkin' modding engine — built for 1:1 compatibility and modular extensibility."
 ---
 
-## Setting up
+Rustic Engine is a high-performance reimplementation of Psych Engine written in Rust. It targets full feature parity with Psych Engine, maintains identical Lua API syntax for mod compatibility, and introduces a clean modular workspace architecture.
 
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Build and run the engine from source in minutes.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Architecture" icon="diagram-project" href="/architecture/overview">
+    Understand the modular crate workspace design.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Modding Guide" icon="puzzle-piece" href="/modding/overview">
+    Learn how to create mods, custom events, and Lua scripts.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Lua API Reference" icon="code" href="/lua-api/overview">
+    Full reference for all Psych Engine-compatible Lua functions.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## What is Rustic Engine?
 
-Everything you need to create world-class documentation.
+Friday Night Funkin' mods are built on top of Psych Engine — a Haxe-based game framework. Rustic Engine reimplements that framework in Rust, giving you:
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+- **Full Psych Engine Lua API compatibility** — Existing mod scripts run without modification
+- **Modular crate architecture** — Six isolated crates prevent cascading breakage as the engine grows
+- **Conductor-driven timing** — All gameplay derives from song position in milliseconds, never wall-clock time
+- **wgpu rendering** — GPU-accelerated sprite rendering via modern graphics APIs
+- **kira audio** — Low-latency audio playback with music/vocals sync
 
-## Need inspiration?
+## Get started
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<Steps>
+  <Step title="Install Rust">
+    Install the Rust toolchain via [rustup](https://rustup.rs) if you haven't already.
+  </Step>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/Quiet-Wolfe/Rustic-Engine.git
+    cd Rustic-Engine
+    ```
+  </Step>
+  <Step title="Build and run">
+    ```bash
+    cargo build
+    cargo run
+    ```
+  </Step>
+  <Step title="Run the tests">
+    ```bash
+    cargo test
+    ```
+  </Step>
+</Steps>
+
+## Core systems
+
+<CardGroup cols={3}>
+  <Card title="Chart format" icon="music" href="/systems/chart-format">
+    Psych Engine JSON chart parsing and legacy format conversion.
+  </Card>
+  <Card title="Conductor" icon="clock" href="/systems/conductor">
+    BPM tracking, beat/step counting, and mid-song tempo changes.
+  </Card>
+  <Card title="Note system" icon="arrow-down" href="/systems/note-system">
+    4-lane notes, hold notes, and hit windows matching Psych Engine exactly.
+  </Card>
+  <Card title="Camera" icon="video" href="/systems/camera">
+    Dual-camera system with lerped movement and zoom pulses.
+  </Card>
+  <Card title="Audio" icon="volume-high" href="/systems/audio">
+    Instrumental and vocal sync via kira with conductor integration.
+  </Card>
+  <Card title="Rendering" icon="paintbrush" href="/systems/rendering">
+    Sparrow XML atlas sprites, animation, and wgpu GPU backend.
+  </Card>
+</CardGroup>

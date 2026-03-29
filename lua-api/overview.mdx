@@ -1,0 +1,167 @@
+---
+title: "Lua API overview"
+description: "How Rustic Engine loads and runs Lua mod scripts, and how scripts receive game state."
+---
+
+Rustic Engine's `rustic-scripting` crate exposes the full Psych Engine Lua API to mod scripts — over 200 functions covering sprite creation, tweens, camera control, property access, and more. The goal is exact compatibility with Psych Engine's function signatures and behavior so that existing mods run without modification.
+
+<Note>
+  Lua scripting is implemented in Phase 5 of development. The API surface is complete; integration with the live game loop is ongoing.
+</Note>
+
+## How scripts are loaded
+
+The `ScriptManager` struct manages all active Lua scripts for a song. You load a script by passing a filesystem path:
+
+```rust
+let mut manager = ScriptManager::new();
+manager.load_script(Path::new("mods/my-mod/scripts/song.lua"));
+```
+
+Each script gets its own isolated Lua VM. Multiple scripts can be loaded simultaneously — a stage script and a song-specific modchart script are both common.
+
+## Configuring script state before loading
+
+Before loading scripts, provide the engine with the context they need:
+
+```rust
+// Song metadata
+manager.set_globals("bopeebo", false);
+
+// Character names (used for runHaxeCode switch resolution)
+manager.set_char_names("bf", "dad", "gf");
+
+// Asset search roots (so Lua can resolve image paths)
+manager.set_image_roots(vec![
+    PathBuf::from("mods/my-mod"),
+    PathBuf::from("assets"),
+]);
+```
+
+After loading, populate note data so modcharts can read and modify individual notes:
+
+```rust
+// Each entry: (strum_time_ms, lane, must_press, sustain_length_ms)
+manager.populate_note_data(&chart_notes);
+```
+
+## Script lifecycle
+
+<Steps>
+  <Step title="Configure state">
+    Call `set_globals`, `set_char_names`, and `set_image_roots` before loading any scripts.
+  </Step>
+  <Step title="Load scripts">
+    Call `load_script` for each `.lua` file. The file is executed immediately on load, so any top-level code runs at this point. This is where `onCreate` fires.
+  </Step>
+  <Step title="Populate note data">
+    Call `populate_note_data` after all scripts are loaded. This populates `__note_read_data` in each Lua VM.
+  </Step>
+  <Step title="Dispatch callbacks per game event">
+    During gameplay, the engine calls callbacks on all loaded scripts whenever relevant game events occur: beats, steps, note hits, custom events, and so on.
+  </Step>
+  <Step title="Update tweens each frame">
+    Call `update_tweens(dt)` every frame to advance active tweens and timers, and to fire `onTweenCompleted` and `onTimerCompleted` callbacks.
+  </Step>
+</Steps>
+
+## Global variables available to scripts
+
+When a script loads, the following globals are set automatically:
+
+| Variable | Type | Description |
+|---|---|---|
+| `songName` | string | Current song name |
+| `isStoryMode` | boolean | Whether playing in story mode |
+| `screenWidth` | number | Game window width (default 1280) |
+| `screenHeight` | number | Game window height (default 720) |
+| `curBeat` | number | Current beat (synced before each callback) |
+| `curStep` | number | Current step |
+| `curSection` | number | Current section |
+| `defaultCamZoom` | number | Default camera zoom (0.9) |
+| `cameraSpeed` | number | Camera follow speed multiplier (1.0) |
+| `difficulty` | number | Song difficulty (0 = easy, 1 = normal, 2 = hard) |
+| `modcharts` | boolean | Always `true` in Rustic Engine |
+| `version` | string | Psych Engine version string (`"0.7.3"`) |
+| `buildTarget` | string | Platform identifier (`"linux"`) |
+
+## Script types
+
+**Song scripts** are loaded per-song and typically live at `mods/<mod>/scripts/<song-name>.lua`. They handle note events, custom modchart behavior, and song-specific visual effects.
+
+**Stage scripts** are loaded when a stage is selected and live alongside stage JSON definitions. They handle stage-specific sprite creation, camera positioning, and background animations.
+
+Both script types use the same API. The difference is only in when they are loaded and what game state is relevant.
+
+## Utility functions
+
+Several utility functions are available to all scripts:
+
+| Function | Description |
+|---|---|
+| `getSongPosition()` | Returns current song position in milliseconds |
+| `debugPrint(...)` | Logs a message to the engine console (`log::info`) |
+| `luaTrace(...)` | Alias for `debugPrint` |
+| `triggerEvent(name, v1, v2)` | Queues a custom event to fire from Lua |
+| `getSoundPosition()` | Returns audio playback position |
+| `getRandomInt(min, max)` | Returns a random integer in range |
+| `getRandomFloat(min, max)` | Returns a random float in range |
+| `getRandomBool(chance)` | Returns a random boolean with given percent chance |
+| `stringStartsWith(s, prefix)` | String utility |
+| `stringEndsWith(s, suffix)` | String utility |
+| `stringSplit(s, sep)` | Splits a string into a Lua table |
+| `stringTrim(s)` | Trims whitespace |
+| `getColorFromHex(hex)` | Converts a hex color string to an integer |
+| `getMidpointX(tag)` / `getMidpointY(tag)` | Returns sprite or character center position |
+| `close()` | Stops this script from receiving further callbacks |
+| `runHaxeCode(code)` | Psych Engine Haxe compatibility shim (partial support) |
+| `runHaxeFunction(name, args)` | Calls a known Haxe function pattern |
+
+## Text functions
+
+Lua scripts can create and manage text objects via `makeLuaText`:
+
+```lua
+function onCreate()
+  makeLuaText("myText", "Hello World", 0, 100, 50)
+  setTextSize("myText", 32)
+  setTextColor("myText", "FF0000")
+  setObjectCamera("myText", "camHUD")
+  addLuaText("myText", true)
+end
+```
+
+| Function | Description |
+|---|---|
+| `makeLuaText(tag, text, width, x, y)` | Create a text object |
+| `addLuaText(tag, inFront)` | Add text to the scene |
+| `removeLuaText(tag)` | Remove text from the scene |
+| `luaTextExists(tag)` | Check if a text object exists |
+| `setTextString(tag, text)` | Update the text content |
+| `setTextSize(tag, size)` | Set font size in pixels |
+| `setTextColor(tag, colorHex)` | Set text color |
+| `setTextFont(tag, font)` | Set font name |
+| `setTextBorder(tag, size, colorHex)` | Set border/outline |
+| `setTextAlignment(tag, align)` | Set alignment: `"left"`, `"center"`, `"right"` |
+| `setTextWidth(tag, width)` | Set wrapping width |
+| `getTextString(tag)` | Read current text content |
+
+## Reference
+
+<CardGroup cols={2}>
+  <Card title="Callbacks" icon="bell" href="/lua-api/callbacks">
+    All callback functions your script can define, with arguments and when they fire.
+  </Card>
+  <Card title="Sprite functions" icon="image" href="/lua-api/sprite-functions">
+    Create, add, animate, and remove Lua sprites.
+  </Card>
+  <Card title="Tween functions" icon="chart-line" href="/lua-api/tween-functions">
+    Animate properties over time with easing functions.
+  </Card>
+  <Card title="Camera functions" icon="camera" href="/lua-api/camera-functions">
+    Control camera zoom, position, and effects.
+  </Card>
+  <Card title="Property functions" icon="sliders" href="/lua-api/property-functions">
+    Read and write game object properties from Lua.
+  </Card>
+</CardGroup>

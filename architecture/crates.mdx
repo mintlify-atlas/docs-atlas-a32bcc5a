@@ -1,0 +1,226 @@
+---
+title: "Workspace crates"
+description: "Detailed reference for each of the seven crates in the Rustic Engine Cargo workspace."
+---
+
+The workspace `Cargo.toml` declares seven members. Six are domain crates with single responsibilities; one (`rustanimate`) is a support library for animation. Use the sections below to understand what belongs in each crate and what does not.
+
+```toml Cargo.toml
+[workspace]
+resolver = "2"
+members = [
+    "crates/rustic-core",
+    "crates/rustic-audio",
+    "crates/rustic-render",
+    "crates/rustic-gameplay",
+    "crates/rustic-scripting",
+    "crates/rustic-app",
+    "crates/rustanimate",
+]
+```
+
+<AccordionGroup>
+
+  <Accordion title="rustic-core — data types and parsing" icon="database" id="rustic-core">
+    `rustic-core` is the foundation of the entire workspace. It contains every data type and parser the engine needs to understand game content. It has **zero rendering or audio dependencies** — if you add `wgpu` or `kira` as a dependency here, that is a bug.
+
+    **Modules** (from `crates/rustic-core/src/lib.rs`):
+
+    ```rust
+    pub mod chart;      // Psych Engine JSON chart format
+    pub mod character;  // Character definition files
+    pub mod conductor;  // BPM tracking, beat/step/section mapping
+    pub mod note;       // Note types and lane definitions
+    pub mod paths;      // Asset path resolution
+    pub mod rating;     // Rating thresholds (Sick/Good/Bad/Shit)
+    pub mod scoring;    // Score calculation math
+    pub mod stage;      // Stage background definition files
+    pub mod week;       // Week/story mode metadata
+    ```
+
+    **What belongs here:**
+    - Chart parsing (Psych Engine JSON format: `song.notes[]`, `song.events[]`, `mustHitSection`, mid-song BPM changes)
+    - Character JSON parsing (atlas prefix mappings, offsets, camera offsets, sing duration, health icon)
+    - Stage JSON parsing (sprite layers, scroll factors, positions, zoom)
+    - Note type definitions (4 lanes: left/down/up/right; opponent + player strums)
+    - Hit window constants — Sick (45 ms), Good (90 ms), Bad (135 ms), Shit (166 ms) — matching Psych Engine exactly
+    - Conductor: maps song position in milliseconds to beats, steps, and sections; supports mid-song BPM changes
+    - Scoring and rating math
+    - Asset path resolution and mod directory lookup
+
+    **What does not belong here:** any import of `wgpu`, `winit`, `kira`, or any rendering/audio crate.
+
+    **Testing:** You can run `rustic-core` tests without a display or audio device, which is the point:
+
+    ```bash
+    cargo test -p rustic-core
+    ```
+  </Accordion>
+
+  <Accordion title="rustic-audio — audio playback and conductor sync" icon="volume-high" id="rustic-audio">
+    `rustic-audio` owns everything related to sound. It wraps the [`kira`](https://docs.rs/kira) audio library (version 0.9, with the `ogg` feature) and exposes a clean `AudioEngine` type that the rest of the workspace can pass around.
+
+    **Responsibilities:**
+    - Music (instrumental) and vocals playback and sync
+    - Sound effects (miss sounds, countdown bleeps)
+    - `AudioEngine` — the shared handle that screens pass to each other during transitions so menu music (`freakyMenu`) continues playing across screen changes
+
+    **Key dependency:** `kira = { version = "0.9", features = ["ogg"] }`
+
+    **What does not belong here:** gameplay logic, rendering, or timing derived from wall-clock time. All timing must come from the conductor in `rustic-core`, which tracks song position in milliseconds.
+  </Accordion>
+
+  <Accordion title="rustic-render — all drawing" icon="paintbrush" id="rustic-render">
+    `rustic-render` is the only crate that talks to the GPU. Nothing outside this crate should touch `wgpu` directly.
+
+    **Modules** (from `crates/rustic-render/src/lib.rs`):
+
+    ```rust
+    pub mod camera;      // Dual-camera system (game world + HUD overlay)
+    pub mod gpu;         // GpuState: wgpu device, queue, surface, pipelines
+    pub mod postprocess; // Post-processing passes
+    pub mod shader;      // WGSL/GLSL shader management via naga
+    pub mod sprites;     // Sparrow XML atlas parsing, sprite animation
+    pub mod text;        // Text rendering via glyphon
+    ```
+
+    **Responsibilities:**
+    - `GpuState` — the central wgpu context (device, queue, swap chain). Every screen receives a `&mut GpuState` on `draw()`
+    - Sparrow XML atlas parsing: each `<SubTexture>` element carries a name, position, frame offsets, and optional rotation; animation names are derived by stripping trailing digits from subtexture names
+    - Sprite animation playback
+    - Dual camera system: one camera for the game world, one for the HUD overlay. Cameras follow the current singer with lerped movement; zoom pulses on beats
+    - Text rendering via `glyphon`
+    - Post-processing
+
+    **Key dependencies:** `wgpu = "28"`, `naga = { version = "28", features = ["glsl-in", "wgsl-out"] }`, `winit = "0.30"`, `glyphon = "0.10"`, `image = "0.25"`, `bytemuck`, `rustanimate`
+
+    **What does not belong here:** game rules, input handling, audio, or Lua scripting.
+
+    <Note>
+      The camera zoom math is intentionally improved over Psych Engine's implementation. Psych Engine's beat-bump is jittery; `rustic-render` smooths the zoom curve while keeping the same Lua API surface so scripts remain compatible.
+    </Note>
+  </Accordion>
+
+  <Accordion title="rustic-gameplay — game logic" icon="gamepad" id="rustic-gameplay">
+    `rustic-gameplay` implements the rules of Friday Night Funkin' without touching the screen. It never calls into `rustic-render` directly — instead it emits events that the render layer consumes.
+
+    **Modules** (from `crates/rustic-gameplay/src/lib.rs`):
+
+    ```rust
+    pub mod events;      // Typed game events emitted by gameplay logic
+    pub mod play_state;  // PlayState: the in-song game loop
+    ```
+
+    **Responsibilities:**
+    - Input handling: detecting key presses on the 4-lane strum layout
+    - Note hit/miss detection against Psych Engine's exact hit windows (Sick 45 ms, Good 90 ms, Bad 135 ms, Shit 166 ms)
+    - Hold note logic: score per tick while held; releasing early counts as missing the remainder
+    - Health tracking
+    - Score and combo accumulation
+    - `PlayState`: the top-level game loop that runs while a song is playing
+    - Event emission so `rustic-app` and `rustic-render` can react to gameplay changes
+
+    **What does not belong here:** any call to `wgpu`, `winit` drawing primitives, or `kira`. Render and audio react to events, not to direct calls from gameplay.
+  </Accordion>
+
+  <Accordion title="rustic-scripting — Lua VM integration" icon="code" id="rustic-scripting">
+    `rustic-scripting` embeds a Lua VM and exposes the Psych Engine Lua API. The goal is that an existing Psych Engine mod script runs without modification.
+
+    **Public surface** (from `crates/rustic-scripting/src/lib.rs`):
+
+    ```rust
+    pub use lua_engine::LuaScript;
+    pub use script_state::{ScriptState, LuaSprite, LuaSpriteKind, LuaValue, StrumProps};
+    pub use tweens::{TweenManager, Tween, TweenProperty, EaseFunc, LuaTimer};
+    ```
+
+    **`ScriptManager`** manages all Lua scripts active for a song (stage script + per-song scripts) and owns the shared `ScriptState` that Lua functions read and write.
+
+    **Supported callback groups** (matching Psych Engine's API exactly):
+
+    | Group | Callbacks |
+    |---|---|
+    | Song lifecycle | `onCreate`, `onCreatePost`, `onUpdate`, `onUpdatePost`, `onSongStart`, `onEndSong` |
+    | Note events | `onSpawnNote`, `goodNoteHit`, `opponentNoteHit`, `noteMiss`, `noteMissPress` |
+    | Beat/step | `onBeatHit`, `onStepHit`, `onSectionHit` |
+    | Custom events | `onEvent`, `eventEarlyTrigger` |
+    | Tweens/timers | `onTweenCompleted`, `onTimerCompleted` |
+
+    **Key `ScriptManager` methods:**
+
+    ```rust
+    manager.load_script(path);                   // Load a .lua file
+    manager.call("onCreate");                    // Fire callback, no args
+    manager.call_with_elapsed("onUpdate", dt);   // Fire with elapsed time
+    manager.call_note_hit("goodNoteHit", …);     // Fire note-hit callback
+    manager.call_beat("onBeatHit", beat);        // Fire with beat number
+    manager.call_event("onEvent", name, v1, v2); // Fire custom event
+    manager.populate_note_data(&notes);          // Expose note array to modcharts
+    manager.update_tweens(dt);                   // Advance tweens and timers
+    ```
+
+    **Tween system:** `TweenManager` drives property animation on Lua sprites, strum props, cameras, and custom variables. Completed tweens fire `onTweenCompleted`; completed timers fire `onTimerCompleted`.
+
+    **What does not belong here:** gameplay rules, rendering, audio playback. Scripts emit property writes that `rustic-app` applies to the correct subsystems — `rustic-scripting` itself does not hold references to the GPU or audio engine.
+
+    <Tip>
+      The ultimate integration test for this crate is running the **VS Retrospecter Part 2** compiled mod. When that mod works correctly with full Lua modchart support, the scripting layer is ready.
+    </Tip>
+  </Accordion>
+
+  <Accordion title="rustic-app — binary entry point and state machine" icon="play" id="rustic-app">
+    `rustic-app` is the only binary in the workspace. Its job is to start a `winit` event loop, create the `GpuState`, and drive the screen state machine. It wires every other crate together without containing domain logic itself.
+
+    **Key types** (from `crates/rustic-app/src/`):
+
+    ```rust
+    // screen.rs — the trait every screen implements
+    pub trait Screen {
+        fn init(&mut self, gpu: &GpuState);
+        fn handle_key(&mut self, key: KeyCode);
+        fn handle_key_release(&mut self, key: KeyCode) {}
+        fn update(&mut self, dt: f32);
+        fn draw(&mut self, gpu: &mut GpuState);
+        fn next_screen(&mut self) -> Option<Box<dyn Screen>> { None }
+        fn take_audio(&mut self) -> Option<AudioEngine> { None }
+        fn set_audio(&mut self, audio: AudioEngine) {}
+    }
+    ```
+
+    The `App` struct implements `winit::application::ApplicationHandler`. On each `RedrawRequested` event it:
+    1. Computes `dt` (delta time in seconds since last frame)
+    2. Calls `current_screen.update(dt)`
+    3. Checks `current_screen.next_screen()` — if `Some`, transitions to the new screen, passing the audio engine via `take_audio` / `set_audio`
+    4. Calls `current_screen.draw(gpu)`
+
+    The game window is 1280 × 720 logical pixels (`GAME_W = 1280.0`, `GAME_H = 720.0`).
+
+    **Screens** (from `crates/rustic-app/src/screens/mod.rs`):
+
+    ```rust
+    pub mod characters;   // Character viewer
+    pub mod freeplay;     // Song selection and difficulty picker
+    pub mod main_menu;    // Main menu
+    pub mod play;         // In-song gameplay (PlayScreen)
+    pub mod sprite_test;  // Developer sprite/atlas testing screen
+    pub mod title;        // Title screen (first screen to load)
+    ```
+
+    Each screen is a dedicated module. This is the direct lesson from V1: do not let all screen logic accumulate in one file.
+
+    **What does not belong here:** domain logic, parsing, audio DSP, GPU pipelines. When `rustic-app` needs game data it calls into the appropriate domain crate.
+  </Accordion>
+
+  <Accordion title="rustanimate — animation support" icon="film" id="rustanimate">
+    `rustanimate` is a support library for animation. It is used by `rustic-render` to drive sprite frame sequences.
+
+    It is declared as a workspace member and a workspace dependency:
+
+    ```toml
+    rustanimate = { path = "crates/rustanimate" }
+    ```
+
+    The animation state it manages is consumed by the sprite system in `rustic-render`.
+  </Accordion>
+
+</AccordionGroup>

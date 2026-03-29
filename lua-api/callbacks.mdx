@@ -1,0 +1,318 @@
+---
+title: "Callbacks"
+description: "Every callback your Lua script can define, with arguments and when each one fires."
+---
+
+Callbacks are Lua functions your script defines at the global level. The engine calls them automatically when the corresponding game event occurs. You do not need to register them — simply define a function with the correct name.
+
+```lua
+function onCreate()
+  -- runs once when the song initializes
+  makeLuaSprite("mySprite", "images/bg", 0, 0)
+  addLuaSprite("mySprite", false)
+end
+
+function onUpdate(elapsed)
+  -- runs every frame
+end
+```
+
+If a callback is not defined in your script, the engine skips it silently.
+
+## How callbacks are dispatched
+
+The `ScriptManager` dispatches callbacks using several internal methods depending on the argument signature needed:
+
+| Internal method | Used for |
+|---|---|
+| `call(name)` | Callbacks with no arguments |
+| `call_with_elapsed(name, dt)` | `onUpdate`, `onUpdatePost` |
+| `call_note_hit(name, ...)` | Note hit/miss callbacks |
+| `call_beat(name, beat)` | `onBeatHit` |
+| `call_step(name, step)` | `onStepHit` |
+| `call_event(name, v1, v2)` | `onEvent` |
+
+Each call syncs current game state into the Lua VM first (beat, step, section, character positions, strum props, etc.), then invokes the callback, then drains any pending operations the script queued (sprite creation, tween starts, property writes, etc.).
+
+---
+
+## Song lifecycle
+
+### `onCreate`
+
+Fired once when the song scene initializes, before the countdown starts.
+
+```lua
+function onCreate()
+  -- Create sprites, set up variables
+end
+```
+
+Use `onCreate` to create Lua sprites, initialize custom variables, and set up anything that needs to exist before gameplay begins.
+
+### `onCreatePost`
+
+Fired after `onCreate` completes and all engine setup is done.
+
+```lua
+function onCreatePost()
+  -- Safe to reference objects created in onCreate
+end
+```
+
+### `onUpdate`
+
+Fired every frame during gameplay.
+
+<ParamField path="elapsed" type="number">
+  Time in seconds since the last frame (delta time).
+</ParamField>
+
+```lua
+function onUpdate(elapsed)
+  setProperty("mySprite.angle", getProperty("mySprite.angle") + 90 * elapsed)
+end
+```
+
+### `onUpdatePost`
+
+Fired every frame after all engine update logic runs.
+
+<ParamField path="elapsed" type="number">
+  Time in seconds since the last frame (delta time).
+</ParamField>
+
+### `onSongStart`
+
+Fired when the song audio begins (after countdown).
+
+```lua
+function onSongStart()
+  doTweenAlpha("fadeIn", "overlay", 0, 1.0, "quadOut")
+end
+```
+
+### `onEndSong`
+
+Fired when the song finishes playing, before the results screen.
+
+```lua
+function onEndSong()
+  -- Clean up or trigger final effects
+end
+```
+
+---
+
+## Note events
+
+Note event callbacks all share the same four arguments.
+
+<ParamField path="membersIndex" type="number">
+  The note's index in the members array. Use with `getPropertyFromGroup` to read other note properties.
+</ParamField>
+
+<ParamField path="noteData" type="number">
+  The lane index: `0` = left, `1` = down, `2` = up, `3` = right.
+</ParamField>
+
+<ParamField path="noteType" type="string">
+  The note type string, e.g. `""` (default), `"Hurt Note"`, `"Alt Animation"`.
+</ParamField>
+
+<ParamField path="isSustainNote" type="boolean">
+  `true` if this is a hold/sustain note tail, `false` for the note head.
+</ParamField>
+
+### `goodNoteHit`
+
+Fired when the player hits a note successfully.
+
+```lua
+function goodNoteHit(membersIndex, noteData, noteType, isSustainNote)
+  if noteType == "Hurt Note" then
+    cameraShake("camGame", 0.02, 0.3)
+  end
+end
+```
+
+### `opponentNoteHit`
+
+Fired when the opponent (dad) hits a note.
+
+```lua
+function opponentNoteHit(membersIndex, noteData, noteType, isSustainNote)
+  -- Mirror effects for opponent notes
+end
+```
+
+### `noteMiss`
+
+Fired when the player misses a note (it scrolled past without a hit).
+
+```lua
+function noteMiss(membersIndex, noteData, noteType, isSustainNote)
+  doTweenAlpha("missFade", "healthBar", 0.5, 0.1, "linear")
+end
+```
+
+### `noteMissPress`
+
+Fired when the player presses a key with no note to hit (ghost tap).
+
+```lua
+function noteMissPress(membersIndex, noteData, noteType, isSustainNote)
+end
+```
+
+<Note>
+  `noteMissPress` only fires when `ghostTapping` is `false`. With ghost tapping enabled (the default), pressing keys with no notes does not count as a miss.
+</Note>
+
+### `onSpawnNote`
+
+Fired when a note is spawned from the unspawn pool (before it appears on screen).
+
+```lua
+function onSpawnNote(membersIndex, noteData, noteType, isSustainNote)
+  -- Modify the note visually before it appears
+  setPropertyFromGroup("notes", membersIndex, "alpha", 0.8)
+end
+```
+
+---
+
+## Beat, step, and section
+
+### `onBeatHit`
+
+Fired on every beat of the song. `curBeat` is updated before this callback runs.
+
+```lua
+function onBeatHit()
+  if curBeat % 2 == 0 then
+    doTweenZoom("zoomBump", "camGame", defaultCamZoom + 0.05, 0.1, "quadOut")
+  end
+end
+```
+
+### `onStepHit`
+
+Fired on every step (4 steps per beat). `curStep` is updated before this callback runs.
+
+```lua
+function onStepHit()
+  -- curStep increments 4x per beat
+end
+```
+
+### `onSectionHit`
+
+Fired at the start of each chart section (1 section = 16 steps by default). `curSection` is updated before this callback runs.
+
+```lua
+function onSectionHit()
+  -- Good place for longer-cycle effects
+end
+```
+
+---
+
+## Custom events
+
+### `onEvent`
+
+Fired when the chart triggers a named custom event.
+
+<ParamField path="name" type="string">
+  The event name as defined in the chart editor.
+</ParamField>
+
+<ParamField path="value1" type="string">
+  First event value (always a string; parse numbers with `tonumber`).
+</ParamField>
+
+<ParamField path="value2" type="string">
+  Second event value.
+</ParamField>
+
+```lua
+function onEvent(name, value1, value2)
+  if name == "Camera Flash" then
+    cameraFlash("camGame", value1, tonumber(value2) or 0.5)
+  elseif name == "Screen Shake" then
+    local intensity = tonumber(value1) or 0.01
+    local duration  = tonumber(value2) or 0.3
+    cameraShake("camGame", intensity, duration)
+  end
+end
+```
+
+### `eventEarlyTrigger`
+
+Return a number of milliseconds to fire an event early. Useful for syncing visual effects to audio.
+
+<ParamField path="name" type="string">
+  The event name being queried.
+</ParamField>
+
+```lua
+function eventEarlyTrigger(name)
+  if name == "Camera Flash" then
+    return 1 -- fire 1ms early
+  end
+  return 0
+end
+```
+
+---
+
+## Tween and timer completion
+
+### `onTweenCompleted`
+
+Fired when a tween finishes.
+
+<ParamField path="tag" type="string">
+  The tag string passed to the tween function (e.g. `doTweenX`).
+</ParamField>
+
+<ParamField path="vars" type="string">
+  The tween target identifier.
+</ParamField>
+
+```lua
+function onTweenCompleted(tag, vars)
+  if tag == "slideIn" then
+    -- sprite has finished sliding into position
+    setProperty("mySprite.visible", false)
+  end
+end
+```
+
+### `onTimerCompleted`
+
+Fired each time a timer loop completes (once per loop, not just on final completion).
+
+<ParamField path="tag" type="string">
+  The tag string passed to `runTimer`.
+</ParamField>
+
+<ParamField path="loops_done" type="number">
+  How many loops have completed so far.
+</ParamField>
+
+<ParamField path="loops_left" type="number">
+  How many loops remain. `0` means the timer is fully done.
+</ParamField>
+
+```lua
+function onTimerCompleted(tag, loops_done, loops_left)
+  if tag == "flashTimer" then
+    cameraFlash("camGame", "FFFFFF", 0.3)
+    if loops_left == 0 then
+      debugPrint("All flashes done!")
+    end
+  end
+end
+```

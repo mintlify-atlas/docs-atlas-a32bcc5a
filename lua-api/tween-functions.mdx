@@ -1,0 +1,397 @@
+---
+title: "Tween functions"
+description: "Animate sprite and camera properties over time using Rustic Engine's tween and timer system."
+---
+
+Tweens interpolate a property from its current value to a target value over a given duration. When a tween finishes, the `onTweenCompleted` callback fires. Timers fire `onTimerCompleted` on each loop completion.
+
+All tweens and timers are identified by a **tag** string. Cancelling a tag stops that tween immediately. If you start a new tween with a tag that is already running, the old tween is replaced.
+
+```lua
+function onSongStart()
+  -- Slide the HUD in from the left over 0.5s
+  doTweenX("hudSlide", "myHudSprite", 100, 0.5, "quadOut")
+end
+
+function onTweenCompleted(tag, vars)
+  if tag == "hudSlide" then
+    debugPrint("HUD is in position!")
+  end
+end
+```
+
+---
+
+## Position tweens
+
+### `doTweenX`
+
+Tweens the X position of a sprite or game object.
+
+<ParamField path="tag" type="string" required>
+  Identifier for this tween. Passed to `onTweenCompleted` when done.
+</ParamField>
+
+<ParamField path="target" type="string" required>
+  The object to tween. Can be a Lua sprite tag, `"dad"` / `"boyfriend"` / `"gf"`, or a strum path like `"strumLineNotes.members[0]"`.
+</ParamField>
+
+<ParamField path="value" type="number" required>
+  Target X position.
+</ParamField>
+
+<ParamField path="duration" type="number" required>
+  Duration in seconds.
+</ParamField>
+
+<ParamField path="ease" type="string" default="linear">
+  Easing function name. See the [easing reference](#easing-functions) below.
+</ParamField>
+
+```lua
+doTweenX("slideLeft", "mySprite", -200, 0.4, "quadIn")
+```
+
+### `doTweenY`
+
+Tweens the Y position of a sprite or game object.
+
+<ParamField path="tag" type="string" required>
+  Tween identifier.
+</ParamField>
+
+<ParamField path="target" type="string" required>
+  Target object.
+</ParamField>
+
+<ParamField path="value" type="number" required>
+  Target Y position.
+</ParamField>
+
+<ParamField path="duration" type="number" required>
+  Duration in seconds.
+</ParamField>
+
+<ParamField path="ease" type="string" default="linear">
+  Easing function name.
+</ParamField>
+
+```lua
+doTweenY("dropDown", "mySprite", 600, 0.6, "bounceOut")
+```
+
+---
+
+## Visual property tweens
+
+### `doTweenAlpha`
+
+Tweens the alpha (transparency) of a sprite.
+
+<ParamField path="tag" type="string" required>
+  Tween identifier.
+</ParamField>
+
+<ParamField path="target" type="string" required>
+  Sprite tag.
+</ParamField>
+
+<ParamField path="value" type="number" required>
+  Target alpha, from `0.0` (invisible) to `1.0` (opaque).
+</ParamField>
+
+<ParamField path="duration" type="number" required>
+  Duration in seconds.
+</ParamField>
+
+<ParamField path="ease" type="string" default="linear">
+  Easing function name.
+</ParamField>
+
+```lua
+-- Fade out over 1 second
+doTweenAlpha("fadeOut", "mySprite", 0, 1.0, "quadIn")
+```
+
+### `doTweenAngle`
+
+Tweens the rotation angle of a sprite.
+
+<ParamField path="tag" type="string" required>
+  Tween identifier.
+</ParamField>
+
+<ParamField path="target" type="string" required>
+  Sprite tag.
+</ParamField>
+
+<ParamField path="value" type="number" required>
+  Target angle in degrees.
+</ParamField>
+
+<ParamField path="duration" type="number" required>
+  Duration in seconds.
+</ParamField>
+
+<ParamField path="ease" type="string" default="linear">
+  Easing function name.
+</ParamField>
+
+```lua
+doTweenAngle("spin", "propeller", 360, 2.0, "linear")
+```
+
+---
+
+## Camera zoom tweens
+
+### `doTweenZoom`
+
+Tweens the zoom level of a camera. Integrates with the property write system — the game applies the zoom each frame.
+
+<ParamField path="tag" type="string" required>
+  Tween identifier.
+</ParamField>
+
+<ParamField path="camera" type="string" required>
+  Camera to zoom: `"camGame"` or `"camHUD"`. Aliases `"game"` and `"hud"` are also accepted.
+</ParamField>
+
+<ParamField path="value" type="number" required>
+  Target zoom value. `1.0` = no zoom. `0.9` is the typical default for `camGame`.
+</ParamField>
+
+<ParamField path="duration" type="number" required>
+  Duration in seconds.
+</ParamField>
+
+<ParamField path="ease" type="string" default="linear">
+  Easing function name.
+</ParamField>
+
+```lua
+-- Dramatic zoom in during a boss moment
+doTweenZoom("bossZoom", "camGame", 1.3, 0.8, "cubeOut")
+
+-- Restore default after 2 seconds
+runTimer("zoomRestore", 2.0, 1)
+
+function onTimerCompleted(tag, loops_done, loops_left)
+  if tag == "zoomRestore" then
+    doTweenZoom("resetZoom", "camGame", defaultCamZoom, 0.5, "quadOut")
+  end
+end
+```
+
+<Note>
+  Rustic Engine's camera zoom implementation is smoother than Psych Engine's original. The zoom math uses proper lerp interpolation instead of the jittery bump system. The Lua API is identical.
+</Note>
+
+---
+
+## Strum/note tweens
+
+These functions tween properties of individual strum note receptors. The `note` parameter is a 0-based index from 0 to 7 (0–3 = opponent, 4–7 = player).
+
+### `noteTweenX`
+
+<ParamField path="tag" type="string" required>
+  Tween identifier.
+</ParamField>
+
+<ParamField path="note" type="number" required>
+  Strum index (0–7).
+</ParamField>
+
+<ParamField path="value" type="number" required>
+  Target X position.
+</ParamField>
+
+<ParamField path="duration" type="number" required>
+  Duration in seconds.
+</ParamField>
+
+<ParamField path="ease" type="string" default="linear">
+  Easing function.
+</ParamField>
+
+### `noteTweenY`
+
+Same as `noteTweenX` but for Y position.
+
+### `noteTweenAlpha`
+
+Same signature, tweens the alpha of a strum receptor.
+
+### `noteTweenAngle`
+
+Same signature, tweens the rotation of a strum receptor.
+
+```lua
+-- Slide all player strums down off-screen at song start, then back up
+function onCreate()
+  for i = 4, 7 do
+    noteTweenY("strumHide" .. i, i, 700, 0)
+  end
+end
+
+function onSongStart()
+  for i = 4, 7 do
+    noteTweenY("strumShow" .. i, i, getPropertyFromGroup("playerStrums", i - 4, "y"), 0.5, "quadOut")
+  end
+end
+```
+
+---
+
+## Generic tween
+
+### `startTween`
+
+Tweens multiple properties on an object at once. Supports any combination of `x`, `y`, `alpha`, `angle`, `scale.x`, `scale.y`, `offset.x`, `offset.y`, and color transform offsets.
+
+<ParamField path="tag" type="string" required>
+  Tween identifier.
+</ParamField>
+
+<ParamField path="target" type="string" required>
+  Target object (sprite tag, strum path, or character name).
+</ParamField>
+
+<ParamField path="values" type="table" required>
+  Table of property→value pairs to tween.
+</ParamField>
+
+<ParamField path="duration" type="number" required>
+  Duration in seconds.
+</ParamField>
+
+<ParamField path="options" type="string | table">
+  Either an ease string or a table with `ease` and optionally `onComplete` keys.
+</ParamField>
+
+```lua
+startTween("move", "mySprite", {x = 400, y = 300, alpha = 0.8}, 1.0, "quadInOut")
+
+-- With options table
+startTween("colorize", "mySprite", {
+  ["scale.x"] = 2.0,
+  ["scale.y"] = 2.0,
+}, 0.5, {ease = "elasticOut"})
+```
+
+---
+
+## Cancelling tweens
+
+### `cancelTween`
+
+Stops a running tween immediately. The property keeps whatever value it was at when cancelled. `onTweenCompleted` does not fire.
+
+<ParamField path="tag" type="string" required>
+  The tag of the tween to cancel.
+</ParamField>
+
+```lua
+cancelTween("slideIn")
+```
+
+<Note>
+  Cancelling a tag also cancels any sub-property tweens created by `startTween` (e.g. `"myTag_x"`, `"myTag_y"`).
+</Note>
+
+---
+
+## Timers
+
+### `runTimer`
+
+Runs a countdown timer that fires `onTimerCompleted` after each loop.
+
+<ParamField path="tag" type="string" required>
+  Timer identifier. Passed to `onTimerCompleted`.
+</ParamField>
+
+<ParamField path="time" type="number" required>
+  Duration of each loop in seconds.
+</ParamField>
+
+<ParamField path="loops" type="number" default="1">
+  Number of times to repeat. Pass `0` for infinite loops.
+</ParamField>
+
+```lua
+-- Fire once after 2 seconds
+runTimer("delay", 2.0, 1)
+
+-- Repeat every 0.5 seconds, 4 times total
+runTimer("pulse", 0.5, 4)
+
+function onTimerCompleted(tag, loops_done, loops_left)
+  if tag == "pulse" then
+    cameraFlash("camGame", "FFFFFF", 0.1)
+  end
+end
+```
+
+### `cancelTimer`
+
+Stops a running timer. `onTimerCompleted` will not fire for cancelled timers.
+
+<ParamField path="tag" type="string" required>
+  The tag of the timer to cancel.
+</ParamField>
+
+```lua
+cancelTimer("delay")
+```
+
+---
+
+## Easing functions
+
+All tween functions accept an `ease` string. The available values are:
+
+<AccordionGroup>
+  <Accordion title="Basic">
+    | Name | Description |
+    |---|---|
+    | `linear` | Constant speed (default) |
+  </Accordion>
+  <Accordion title="Quadratic">
+    | Name | Description |
+    |---|---|
+    | `quadIn` | Slow start, fast end |
+    | `quadOut` | Fast start, slow end |
+    | `quadInOut` | Slow at both ends |
+  </Accordion>
+  <Accordion title="Cubic / Quartic / Quintic">
+    | Name | Description |
+    |---|---|
+    | `cubeIn`, `cubeOut`, `cubeInOut` | Cubic — stronger than quad |
+    | `quartIn`, `quartOut`, `quartInOut` | Quartic |
+    | `quintIn`, `quintOut`, `quintInOut` | Quintic — very strong |
+  </Accordion>
+  <Accordion title="Sine / Expo / Circ">
+    | Name | Description |
+    |---|---|
+    | `sineIn`, `sineOut`, `sineInOut` | Smooth sine curve |
+    | `expoIn`, `expoOut`, `expoInOut` | Exponential — extreme acceleration |
+    | `circIn`, `circOut`, `circInOut` | Circular arc |
+  </Accordion>
+  <Accordion title="Back / Bounce / Elastic">
+    | Name | Description |
+    |---|---|
+    | `backIn`, `backOut`, `backInOut` | Slight overshoot before settling |
+    | `bounceIn`, `bounceOut`, `bounceInOut` | Physical bounce effect |
+    | `elasticIn`, `elasticOut`, `elasticInOut` | Spring oscillation |
+  </Accordion>
+  <Accordion title="Smooth step">
+    | Name | Description |
+    |---|---|
+    | `smoothStepIn`, `smoothStepOut`, `smoothStepInOut` | Hermite smooth step |
+    | `smootherStepIn`, `smootherStepOut`, `smootherStepInOut` | Ken Perlin's smoother step |
+  </Accordion>
+</AccordionGroup>
+
+Ease names are case-insensitive (`"QuadOut"` and `"quadout"` both work).
